@@ -9,9 +9,9 @@ export interface ProductTile {
 }
 
 export const socialMetrics = [
-  '12k+ simulation runs / month',
-  '90+ strategy lessons',
-  'Private member cohorts',
+  'Active simulation volume',
+  'Structured strategy modules',
+  'Member-only cohorts',
   'Selective MIS admissions',
 ];
 

@@ -16,8 +16,8 @@ export default function HomePage() {
       <RevealSection className="container-wide grid gap-10 py-16 md:grid-cols-2 md:py-24">
         <RevealItem className="space-y-6">
           <p className="text-sm uppercase tracking-[0.2em] text-mint">Mint Investment Strategies</p>
-          <h1 className="text-4xl font-semibold tracking-tight md:text-6xl">Sharper strategy, refined through simulation.</h1>
-          <p className="max-w-xl text-lg text-slate-300">A premium platform for modern investors to test frameworks, build conviction, and level up with selective research access.</p>
+          <h1 className="text-4xl font-semibold leading-[1.05] tracking-tight md:text-6xl">Sharper strategy, refined through simulation.</h1>
+          <p className="max-w-xl text-lg text-slate-300">Train frameworks. Build conviction. Execute with discipline.</p>
           <div className="flex flex-wrap gap-3">
             <PrimaryButton href="https://example.com">Try a Sim</PrimaryButton>
             <SecondaryButton href="/signup">Create account</SecondaryButton>
@@ -53,7 +53,7 @@ export default function HomePage() {
       </RevealSection>
 
       <RevealSection className="container-wide py-16">
-        <RevealItem><h2 className="section-title">Product showcase</h2></RevealItem>
+        <RevealItem><h2 className="section-title">The Mint Stack</h2></RevealItem>
         <div className="mt-8 grid gap-6 md:grid-cols-2 xl:grid-cols-3">
           {productTiles.map((tile) => <RevealItem key={tile.title}><ProductCard tile={tile} /></RevealItem>)}
         </div>
@@ -75,7 +75,7 @@ export default function HomePage() {
       <RevealSection className="container-wide py-16">
         <RevealItem className="rounded-3xl border border-mint/20 bg-black px-8 py-12">
           <p className="text-sm uppercase tracking-[0.2em] text-mint">MIS Vault</p>
-          <h2 className="mt-4 text-3xl font-semibold">A premium research and strategy layer, released selectively.</h2>
+          <h2 className="mt-4 text-3xl font-semibold">MIS — Access by request.</h2>
           <p className="mt-4 max-w-2xl text-slate-300">Minimal by design. High-context research notes, framework updates, and private releases for approved members.</p>
           <SecondaryButton href="/contact">Request access</SecondaryButton>
         </RevealItem>

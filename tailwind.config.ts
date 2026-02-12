@@ -11,7 +11,7 @@ export default {
         mint: '#7ce8c8',
       },
       boxShadow: {
-        glow: '0 0 0 1px rgba(124,232,200,0.4), 0 8px 40px rgba(124,232,200,0.14)',
+        glow: '0 0 0 1px rgba(124,232,200,0.36), 0 8px 36px rgba(124,232,200,0.12)',
       },
       borderRadius: {
         xl2: '1.25rem',
