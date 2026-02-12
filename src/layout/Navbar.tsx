@@ -28,7 +28,7 @@ export default function Navbar() {
         </div>
         <div className="flex items-center gap-3">
           <PrimaryButton href="https://example.com">Try a Sim</PrimaryButton>
-          <Link to="/login" className="rounded-xl2 border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-mint/40 hover:text-mint">
+          <Link to="/login" className="rounded-xl2 border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-mint/40 hover:text-mint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mint/70 focus-visible:ring-offset-2 focus-visible:ring-offset-ink">
             Sign in
           </Link>
         </div>
