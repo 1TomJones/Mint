@@ -3,6 +3,7 @@ import { PrimaryButton } from '../components/Buttons';
 
 const navItems = [
   { label: 'Products', href: '/products' },
+  { label: 'Pathways', href: '/pathways' },
   { label: 'Community', href: '/products/community' },
   { label: 'MIS', href: '/products/mis' },
   { label: 'About', href: '/about' },
