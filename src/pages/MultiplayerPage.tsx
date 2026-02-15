@@ -12,6 +12,15 @@ function formatMetric(value: number | null | undefined) {
   return Number(value).toFixed(2);
 }
 
+function formatErrorMessage(message: string) {
+  try {
+    const parsed = JSON.parse(message) as Record<string, unknown>;
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return message;
+  }
+}
+
 export default function MultiplayerPage() {
   const { user, accessToken } = useSupabaseAuth();
   const [eventCode, setEventCode] = useState('');
@@ -44,6 +53,7 @@ export default function MultiplayerPage() {
   }, [accessToken, user]);
 
   const activeEvents = useMemo(() => events.filter((event) => !event.ends_at || new Date(event.ends_at) > new Date()), [events]);
+  const liveEvent = activeEvents[0] ?? null;
 
   if (!user) {
     return (
@@ -71,13 +81,14 @@ export default function MultiplayerPage() {
       setError(null);
       const createdRun = await createRunByCode(eventCode.trim().toUpperCase(), user.id, accessToken);
       window.open(createdRun.simUrl, '_blank', 'noopener,noreferrer');
-      setToast('Run created. Simulation opened in a new tab.');
+      setToast('Run created — sim opened in new tab');
       setEventCode('');
 
       const updatedRuns = await fetchUserRuns(user.id, accessToken);
       setRuns(updatedRuns);
     } catch (joinError) {
-      setError(joinError instanceof Error ? joinError.message : 'Unable to join event.');
+      const message = joinError instanceof Error ? joinError.message : 'Unable to join event.';
+      setError(formatErrorMessage(message));
     } finally {
       setJoining(false);
       setTimeout(() => setToast(null), 3500);
@@ -87,7 +98,7 @@ export default function MultiplayerPage() {
   const handleUseEventCode = (code: string) => {
     setEventCode(code);
     setError(null);
-    setToast(`Code ${code} copied to Join input.`);
+    setToast(`Code ${code} loaded into Join input.`);
     setTimeout(() => setToast(null), 2500);
   };
 
@@ -102,6 +113,21 @@ export default function MultiplayerPage() {
 
       <div className="grid gap-6 lg:grid-cols-[1.15fr_1fr]">
         <div className="space-y-6">
+          {liveEvent && (
+            <article className="rounded-2xl border border-mint/30 bg-slate-900/70 p-5">
+              <p className="text-xs uppercase tracking-[0.2em] text-mint">Live event</p>
+              <h2 className="mt-2 text-lg font-semibold">{liveEvent.name}</h2>
+              <p className="mt-1 text-sm text-slate-300">Code: {liveEvent.code}</p>
+              <button
+                type="button"
+                onClick={() => handleUseEventCode(liveEvent.code)}
+                className="mt-3 rounded-lg border border-mint/40 px-3 py-1.5 text-sm text-mint transition hover:border-mint hover:bg-mint/10"
+              >
+                Join
+              </button>
+            </article>
+          )}
+
           <article className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
             <h2 className="text-lg font-semibold">Join an event</h2>
             <p className="mt-2 text-sm text-slate-300">Enter your event code to create a run and launch the external simulation.</p>
@@ -112,7 +138,7 @@ export default function MultiplayerPage() {
               </button>
             </form>
             {toast && <p className="mt-3 text-sm text-mint">{toast}</p>}
-            {error && <p className="mt-3 text-sm text-rose-300">{error}</p>}
+            {error && <pre className="mt-3 whitespace-pre-wrap rounded-lg border border-rose-300/20 bg-rose-900/20 p-3 text-sm text-rose-200">{error}</pre>}
           </article>
 
           <article className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
@@ -137,6 +163,7 @@ export default function MultiplayerPage() {
                   <tbody>
                     {runs.map((run) => {
                       const metrics = run.run_results[0];
+                      const status = run.finished_at ? 'completed' : 'active';
                       return (
                         <tr key={run.id} className="border-b border-white/5 text-slate-200">
                           <td className="py-3">{new Date(run.created_at).toLocaleString()}</td>
@@ -147,7 +174,7 @@ export default function MultiplayerPage() {
                           <td className="py-3">{formatMetric(metrics?.max_drawdown)}</td>
                           <td className="py-3">
                             <span className={`rounded-full px-2 py-1 text-xs ${run.finished_at ? 'bg-mint/20 text-mint' : 'bg-slate-700 text-slate-200'}`}>
-                              {run.finished_at ? 'finished' : 'active'}
+                              {status}
                             </span>
                           </td>
                           <td className="py-3">

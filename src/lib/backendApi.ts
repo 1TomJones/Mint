@@ -7,9 +7,19 @@ interface BackendOptions {
   userId?: string;
 }
 
-interface BackendError {
+interface BackendErrorPayload {
   error?: string;
   message?: string;
+  [key: string]: unknown;
+}
+
+function toReadableError(rawBody: string) {
+  try {
+    const payload = JSON.parse(rawBody) as BackendErrorPayload;
+    return payload.error ?? payload.message ?? JSON.stringify(payload);
+  } catch {
+    return rawBody;
+  }
 }
 
 async function backendRequest<T>(path: string, options: BackendOptions = {}) {
@@ -35,12 +45,7 @@ async function backendRequest<T>(path: string, options: BackendOptions = {}) {
       throw new Error('Backend request failed');
     }
 
-    try {
-      const payload = JSON.parse(rawBody) as BackendError;
-      throw new Error(payload.error ?? payload.message ?? 'Backend request failed');
-    } catch {
-      throw new Error(rawBody);
-    }
+    throw new Error(toReadableError(rawBody));
   }
 
   if (!hasBody) {
@@ -67,6 +72,7 @@ export function createRunByCode(eventCode: string, userId: string, accessToken?:
 export interface LeaderboardEntry {
   rank: number;
   runId: string;
+  userId: string | null;
   createdAt: string;
   trader: string;
   score: number | null;
@@ -86,6 +92,37 @@ export interface LeaderboardResponse {
 
 export function fetchEventLeaderboard(code: string, limit = 20) {
   return backendRequest<LeaderboardResponse>(`/api/events/${encodeURIComponent(code)}/leaderboard?limit=${limit}`);
+}
+
+export interface BackendRunDetail {
+  id: string;
+  created_at: string;
+  finished_at: string | null;
+  user_id: string | null;
+  event_id: string;
+  events: {
+    id: string;
+    code: string;
+    name: string;
+    sim_url: string;
+    starts_at: string | null;
+    ends_at: string | null;
+  } | null;
+  run_results: {
+    score: number | null;
+    pnl: number | null;
+    sharpe: number | null;
+    max_drawdown: number | null;
+    win_rate: number | null;
+    extra: Record<string, unknown> | null;
+  }[];
+}
+
+export function fetchRunDetailById(runId: string, accessToken?: string, userId?: string) {
+  return backendRequest<{ run: BackendRunDetail }>(`/api/runs/${encodeURIComponent(runId)}`, {
+    accessToken,
+    userId,
+  });
 }
 
 export interface SubmitRunPayload {
