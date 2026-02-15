@@ -71,7 +71,7 @@ export default function MultiplayerPage() {
       setError(null);
       const createdRun = await createRunByCode(eventCode.trim().toUpperCase(), user.id, accessToken);
       window.open(createdRun.simUrl, '_blank', 'noopener,noreferrer');
-      setToast(`Run created. Simulation opened in a new tab.`);
+      setToast('Run created. Simulation opened in a new tab.');
       setEventCode('');
 
       const updatedRuns = await fetchUserRuns(user.id, accessToken);
@@ -82,6 +82,13 @@ export default function MultiplayerPage() {
       setJoining(false);
       setTimeout(() => setToast(null), 3500);
     }
+  };
+
+  const handleUseEventCode = (code: string) => {
+    setEventCode(code);
+    setError(null);
+    setToast(`Code ${code} copied to Join input.`);
+    setTimeout(() => setToast(null), 2500);
   };
 
   return (
@@ -162,10 +169,22 @@ export default function MultiplayerPage() {
           <h2 className="text-lg font-semibold">Active events</h2>
           <div className="mt-4 space-y-3">
             {activeEvents.slice(0, 8).map((event) => (
-              <Link key={event.id} to={`/multiplayer/events/${event.code}`} className="block rounded-xl border border-white/10 bg-slate-950/60 p-4 transition hover:border-mint/40">
+              <div key={event.id} className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
                 <p className="text-sm font-medium">{event.name}</p>
                 <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-400">Code: {event.code}</p>
-              </Link>
+                <div className="mt-3 flex items-center gap-3 text-sm">
+                  <button
+                    type="button"
+                    onClick={() => handleUseEventCode(event.code)}
+                    className="rounded-lg border border-mint/40 px-3 py-1.5 text-mint transition hover:border-mint hover:bg-mint/10"
+                  >
+                    Use code
+                  </button>
+                  <Link className="text-slate-300 hover:text-white" to={`/multiplayer/events/${event.code}`}>
+                    View details
+                  </Link>
+                </div>
+              </div>
             ))}
             {!activeEvents.length && <p className="text-sm text-slate-400">No public active events right now.</p>}
           </div>
