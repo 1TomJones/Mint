@@ -152,6 +152,34 @@ app.post('/api/runs/submit', async (req, res) => {
   }
 });
 
+app.get('/api/runs/:runId', async (req, res) => {
+  try {
+    const runId = req.params.runId?.trim();
+
+    if (!runId) {
+      return res.status(400).json({ error: 'runId is required' });
+    }
+
+    const { data: run, error: runError } = await supabase
+      .from('runs')
+      .select('id,created_at,finished_at,event_id,user_id,events(id,code,name,sim_url,starts_at,ends_at),run_results(score,pnl,sharpe,max_drawdown,win_rate,extra)')
+      .eq('id', runId)
+      .maybeSingle();
+
+    if (runError) {
+      throw runError;
+    }
+
+    if (!run) {
+      return res.status(404).json({ error: 'Run not found' });
+    }
+
+    return res.json({ run });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Unexpected run detail error' });
+  }
+});
+
 app.get('/api/events/:code/leaderboard', async (req, res) => {
   try {
     const code = req.params.code.trim().toUpperCase();
@@ -188,6 +216,7 @@ app.get('/api/events/:code/leaderboard', async (req, res) => {
 
         return {
           runId: row.id,
+          userId: row.user_id ?? null,
           createdAt: row.created_at,
           trader: displayName,
           score: metrics.score ?? null,
