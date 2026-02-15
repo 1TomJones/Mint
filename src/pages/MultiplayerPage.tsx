@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
-import { EventRow, RunRow, createRun, fetchEvents, fetchUserRuns, findEventByCode } from '../lib/supabase';
+import { EventRow, RunRow, fetchEvents, fetchUserRuns } from '../lib/supabase';
+import { createRunByCode } from '../lib/backendApi';
 
 function formatMetric(value: number | null | undefined) {
   if (value === null || value === undefined) {
@@ -68,18 +69,9 @@ export default function MultiplayerPage() {
     try {
       setJoining(true);
       setError(null);
-      const lookup = await findEventByCode(eventCode.trim().toUpperCase(), accessToken);
-      const matched = lookup[0];
-
-      if (!matched) {
-        throw new Error('Event code not found. Please verify with your organizer.');
-      }
-
-      const newRun = await createRun(matched.id, user.id, accessToken);
-      const createdRun = newRun[0];
-
-      window.open(`${matched.sim_url}?run_id=${createdRun.id}`, '_blank', 'noopener,noreferrer');
-      setToast(`Joined ${matched.name}. Simulation opened in a new tab.`);
+      const createdRun = await createRunByCode(eventCode.trim().toUpperCase(), user.id, accessToken);
+      window.open(createdRun.simUrl, '_blank', 'noopener,noreferrer');
+      setToast(`Run created. Simulation opened in a new tab.`);
       setEventCode('');
 
       const updatedRuns = await fetchUserRuns(user.id, accessToken);

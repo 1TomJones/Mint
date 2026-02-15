@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mint Sim Dev Runner</title>
+    <style>
+      body { font-family: Inter, system-ui, sans-serif; background: #020617; color: #e2e8f0; padding: 32px; }
+      .card { max-width: 560px; border: 1px solid #1e293b; background: #0f172a; border-radius: 16px; padding: 24px; }
+      button { background: #5eead4; color: #022c22; border: 0; border-radius: 10px; font-weight: 700; padding: 10px 14px; cursor: pointer; }
+      pre { background: #020617; border: 1px solid #1e293b; border-radius: 12px; padding: 12px; min-height: 48px; }
+      input { width: 100%; border: 1px solid #1e293b; background: #020617; color: #e2e8f0; border-radius: 10px; padding: 10px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Sim Dev Submit</h1>
+      <p>Reads <code>run_id</code> from query string and posts results to <code>/api/runs/submit</code>.</p>
+      <label>Backend URL</label>
+      <input id="backend" />
+      <p>Run ID: <strong id="runId">missing</strong></p>
+      <button id="submit">Submit Results</button>
+      <pre id="output"></pre>
+    </div>
+
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const runId = params.get('run_id') || params.get('runId');
+      const output = document.getElementById('output');
+      const runIdNode = document.getElementById('runId');
+      const backendInput = document.getElementById('backend');
+      const defaultBackend = window.MINT_BACKEND_URL || 'http://localhost:4000';
+      backendInput.value = defaultBackend;
+      runIdNode.textContent = runId || 'missing';
+
+      function random(min, max) {
+        return Number((Math.random() * (max - min) + min).toFixed(2));
+      }
+
+      document.getElementById('submit').addEventListener('click', async () => {
+        if (!runId) {
+          output.textContent = 'Missing run_id query parameter.';
+          return;
+        }
+
+        const payload = {
+          runId,
+          score: random(60, 100),
+          pnl: random(-500, 2500),
+          sharpe: random(-1, 3),
+          max_drawdown: random(1, 18),
+          win_rate: random(35, 78),
+          extra: { mode: 'dev_submit', timestamp: new Date().toISOString() }
+        };
+
+        try {
+          const response = await fetch(`${backendInput.value}/api/runs/submit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const body = await response.json();
+          output.textContent = JSON.stringify({ status: response.status, body }, null, 2);
+        } catch (error) {
+          output.textContent = error instanceof Error ? error.message : String(error);
+        }
+      });
+    </script>
+  </body>
+</html>

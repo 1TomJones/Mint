@@ -1,23 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
-import { EventRow, LeaderboardRow, fetchEventByCode, fetchLeaderboard } from '../lib/supabase';
-
-function maskedName(row: LeaderboardRow) {
-  const email = row.users?.email;
-  if (!email) {
-    return 'Anonymous';
-  }
-
-  const [prefix] = email.split('@');
-  return `${prefix.slice(0, 2)}***`;
-}
+import { EventRow, fetchEventByCode } from '../lib/supabase';
+import { LeaderboardEntry, fetchEventLeaderboard } from '../lib/backendApi';
 
 export default function MultiplayerEventPage() {
   const { eventCode } = useParams();
   const { accessToken } = useSupabaseAuth();
   const [event, setEvent] = useState<EventRow | null>(null);
-  const [rows, setRows] = useState<LeaderboardRow[]>([]);
+  const [rows, setRows] = useState<LeaderboardEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,8 +25,8 @@ export default function MultiplayerEventPage() {
         }
 
         setEvent(selected);
-        const leaderboard = await fetchLeaderboard(selected.id, accessToken);
-        setRows(leaderboard);
+        const leaderboard = await fetchEventLeaderboard(selected.code, 20);
+        setRows(leaderboard.rows);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : 'Unable to load event leaderboard.');
       }
@@ -43,32 +34,6 @@ export default function MultiplayerEventPage() {
 
     void load();
   }, [accessToken, eventCode]);
-
-  const ranking = useMemo(() => {
-    const sorted = [...rows].sort((a, b) => {
-      const aScore = a.run_results[0]?.score ?? Number.NEGATIVE_INFINITY;
-      const bScore = b.run_results[0]?.score ?? Number.NEGATIVE_INFINITY;
-
-      if (aScore === bScore) {
-        return (b.run_results[0]?.pnl ?? Number.NEGATIVE_INFINITY) - (a.run_results[0]?.pnl ?? Number.NEGATIVE_INFINITY);
-      }
-
-      return bScore - aScore;
-    });
-
-    let currentRank = 0;
-    let previousScore: number | null = null;
-
-    return sorted.slice(0, 20).map((row, index) => {
-      const score = row.run_results[0]?.score ?? null;
-      if (score !== previousScore) {
-        currentRank = index + 1;
-        previousScore = score;
-      }
-
-      return { rank: currentRank, row };
-    });
-  }, [rows]);
 
   if (error) {
     return <section className="container-wide py-16 text-rose-300">{error}</section>;
@@ -102,20 +67,17 @@ export default function MultiplayerEventPage() {
               </tr>
             </thead>
             <tbody>
-              {ranking.map(({ rank, row }) => {
-                const metrics = row.run_results[0];
-                return (
-                  <tr key={row.id} className="border-b border-white/5">
-                    <td className="py-3">#{rank}</td>
-                    <td className="py-3">{maskedName(row)}</td>
-                    <td className="py-3">{metrics?.score?.toFixed(2) ?? '—'}</td>
-                    <td className="py-3">{metrics?.pnl?.toFixed(2) ?? '—'}</td>
-                    <td className="py-3">{metrics?.sharpe?.toFixed(2) ?? '—'}</td>
-                    <td className="py-3">{metrics?.max_drawdown?.toFixed(2) ?? '—'}</td>
-                  </tr>
-                );
-              })}
-              {!ranking.length && (
+              {rows.map((row) => (
+                <tr key={row.runId} className="border-b border-white/5">
+                  <td className="py-3">#{row.rank}</td>
+                  <td className="py-3">{row.trader}</td>
+                  <td className="py-3">{row.score?.toFixed(2) ?? '—'}</td>
+                  <td className="py-3">{row.pnl?.toFixed(2) ?? '—'}</td>
+                  <td className="py-3">{row.sharpe?.toFixed(2) ?? '—'}</td>
+                  <td className="py-3">{row.max_drawdown?.toFixed(2) ?? '—'}</td>
+                </tr>
+              ))}
+              {!rows.length && (
                 <tr>
                   <td colSpan={6} className="py-4 text-slate-400">No finished runs yet.</td>
                 </tr>
