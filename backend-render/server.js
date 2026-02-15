@@ -25,17 +25,12 @@ function getUserId(req) {
   return req.body?.userId ?? userIdHeader ?? null;
 }
 
-function maskEmail(email) {
-  if (!email) {
+function formatTrader(userId) {
+  if (!userId) {
     return 'anonymous';
   }
 
-  const [prefix] = email.split('@');
-  if (!prefix) {
-    return 'anonymous';
-  }
-
-  return `${prefix.slice(0, 2)}***`;
+  return `user-${userId.slice(0, 8)}`;
 }
 
 app.get('/health', (_req, res) => {
@@ -178,7 +173,7 @@ app.get('/api/events/:code/leaderboard', async (req, res) => {
 
     const { data: rows, error: rowsError } = await supabase
       .from('runs')
-      .select('id,created_at,run_results(score,pnl,sharpe,max_drawdown,win_rate),users(display_name,email)')
+      .select('id,created_at,user_id,run_results(score,pnl,sharpe,max_drawdown,win_rate)')
       .eq('event_id', event.id)
       .not('finished_at', 'is', null);
 
@@ -189,7 +184,7 @@ app.get('/api/events/:code/leaderboard', async (req, res) => {
     const ranked = (rows ?? [])
       .map((row) => {
         const metrics = row.run_results?.[0] ?? {};
-        const displayName = row.users?.display_name || maskEmail(row.users?.email);
+        const displayName = formatTrader(row.user_id);
 
         return {
           runId: row.id,

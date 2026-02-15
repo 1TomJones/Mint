@@ -27,12 +27,27 @@ async function backendRequest<T>(path: string, options: BackendOptions = {}) {
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
 
+  const rawBody = await response.text();
+  const hasBody = !!rawBody.trim() && response.headers.get('content-length') !== '0';
+
   if (!response.ok) {
-    const payload: BackendError = await response.json().catch(() => ({}));
-    throw new Error(payload.error ?? payload.message ?? 'Backend request failed');
+    if (!hasBody) {
+      throw new Error('Backend request failed');
+    }
+
+    try {
+      const payload = JSON.parse(rawBody) as BackendError;
+      throw new Error(payload.error ?? payload.message ?? 'Backend request failed');
+    } catch {
+      throw new Error(rawBody);
+    }
   }
 
-  return (await response.json()) as T;
+  if (!hasBody) {
+    throw new Error('Backend response was empty.');
+  }
+
+  return JSON.parse(rawBody) as T;
 }
 
 export interface CreateRunResponse {

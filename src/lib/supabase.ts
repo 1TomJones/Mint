@@ -146,15 +146,13 @@ export function fetchRunDetail(runId: string, accessToken: string) {
 export interface LeaderboardRow {
   id: string;
   created_at: string;
+  user_id?: string;
   run_results: {
     score: number | null;
     pnl: number | null;
     sharpe: number | null;
     max_drawdown: number | null;
   }[];
-  users?: {
-    email: string | null;
-  } | null;
 }
 
 export function fetchEventByCode(code: string, accessToken: string) {
@@ -164,7 +162,7 @@ export function fetchEventByCode(code: string, accessToken: string) {
 }
 
 export function fetchLeaderboard(eventId: string, accessToken: string) {
-  return supabaseRequest<LeaderboardRow[]>(`/rest/v1/runs?select=id,created_at,run_results(score,pnl,sharpe,max_drawdown),users(email)&event_id=eq.${encodeURIComponent(eventId)}&finished_at=not.is.null`, {
+  return supabaseRequest<LeaderboardRow[]>(`/rest/v1/runs?select=id,created_at,user_id,run_results(score,pnl,sharpe,max_drawdown)&event_id=eq.${encodeURIComponent(eventId)}&finished_at=not.is.null`, {
     accessToken,
   });
 }
