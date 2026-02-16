@@ -17,13 +17,14 @@ interface ScenarioOption {
 }
 
 const simBaseUrl = (import.meta.env.VITE_PORTFOLIO_SIM_URL as string | undefined)?.replace(/\/$/, '') ?? '';
+const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.trim() ?? '';
 
 function scenarioMetadataUrlCandidates() {
   if (!simBaseUrl) {
     return [] as string[];
   }
 
-  return [`${simBaseUrl}/meta/scenarios`, `${simBaseUrl}/meta/scenarios.json`];
+  return [`${simBaseUrl}/meta/scenarios`, '/meta/scenarios.json'];
 }
 
 function normalizeState(state: string | null | undefined) {
@@ -136,6 +137,7 @@ export default function AdminPage() {
   });
 
   const canLoad = !!accessToken && !!user && isAdmin;
+  const showDebug = import.meta.env.DEV || new URLSearchParams(window.location.search).get('debug') === '1';
 
   const loadEvents = async () => {
     if (!accessToken) return [];
@@ -166,6 +168,11 @@ export default function AdminPage() {
     const loadScenarios = async () => {
       if (!simBaseUrl) {
         const url = 'VITE_PORTFOLIO_SIM_URL is not configured';
+        console.error('[AdminPage] Missing required env var for scenario metadata.', {
+          requiredEnvVars: ['VITE_BACKEND_URL', 'VITE_PORTFOLIO_SIM_URL'],
+          VITE_BACKEND_URL: backendUrl || '(missing)',
+          VITE_PORTFOLIO_SIM_URL: simBaseUrl || '(missing)',
+        });
         setScenarioMetadataUrl(url);
         setScenarioLoadError(`Cannot load scenarios from portfolio sim metadata URL: ${url}`);
         return;
@@ -200,17 +207,15 @@ export default function AdminPage() {
             })
             .filter((scenario) => scenario.id);
 
-          if (!rows.length) {
-            continue;
-          }
-
           setScenarioLoadError(null);
           setScenarios(rows);
-          setForm((current) => ({
-            ...current,
-            scenarioId: current.scenarioId || rows[0].id,
-            durationMinutes: rows[0].durationMinutes ?? current.durationMinutes,
-          }));
+          if (rows.length) {
+            setForm((current) => ({
+              ...current,
+              scenarioId: current.scenarioId || rows[0].id,
+              durationMinutes: rows[0].durationMinutes ?? current.durationMinutes,
+            }));
+          }
           return;
         } catch {
           // try the next endpoint
@@ -425,12 +430,12 @@ export default function AdminPage() {
           {toast && <p className="mt-3 text-sm text-mint">{toast}</p>}
           {error && <p className="mt-3 rounded-lg border border-rose-400/25 bg-rose-900/20 p-3 text-sm text-rose-200">{error}</p>}
           {scenarioLoadError && <p className="mt-3 rounded-lg border border-rose-400/25 bg-rose-900/20 p-3 text-sm text-rose-200">{scenarioLoadError}</p>}
-          {import.meta.env.DEV && (
+          {showDebug && (
             <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/70 p-3 text-xs text-slate-300">
-              <p className="font-semibold uppercase tracking-[0.16em] text-slate-400">Debug (dev only)</p>
-              <p className="mt-2"><span className="text-slate-400">Backend URL:</span> {import.meta.env.VITE_BACKEND_URL || '—'}</p>
+              <p className="font-semibold uppercase tracking-[0.16em] text-slate-400">Debug</p>
+              <p className="mt-2"><span className="text-slate-400">Backend URL:</span> {backendUrl || '—'}</p>
               <p><span className="text-slate-400">Portfolio Sim URL:</span> {simBaseUrl || '—'}</p>
-              <p><span className="text-slate-400">Scenario metadata URL:</span> {scenarioMetadataUrl || '—'}</p>
+              <p><span className="text-slate-400">Final scenarios URL attempted:</span> {scenarioMetadataUrl || '—'}</p>
               <p><span className="text-slate-400">Scenarios loaded:</span> {scenarios.length}</p>
             </div>
           )}
