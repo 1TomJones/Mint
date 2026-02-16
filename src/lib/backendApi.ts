@@ -139,7 +139,7 @@ export async function fetchPortfolioScenarioMetadata() {
 }
 
 export interface CreateRunResponse {
-  runId: string;
+  runId: string | null;
   launchUrl: string;
 }
 
@@ -164,12 +164,12 @@ export async function createRunByCode(eventCode: string, userId: string, accessT
   const runId = response.runId ?? response.run_id;
   const launchUrl = response.launchUrl ?? response.launch_url ?? response.simUrl ?? response.sim_url;
 
-  if (!runId || !launchUrl) {
-    throw new Error('Backend response missing run_id or launch_url.');
+  if (!launchUrl) {
+    throw new Error('Backend response missing sim_url.');
   }
 
   return {
-    runId,
+    runId: runId ?? null,
     launchUrl,
   } satisfies CreateRunResponse;
 }
@@ -265,7 +265,7 @@ export function fetchAdminStatus(accessToken: string) {
 }
 
 export function fetchAdminEvents(accessToken: string) {
-  return backendRequest<{ events: AdminEvent[] }>('/api/admin/events', { accessToken });
+  return backendRequest<{ events: AdminEvent[] }>('/api/events/public', { accessToken });
 }
 
 export interface CreateAdminEventInput {
@@ -277,7 +277,7 @@ export interface CreateAdminEventInput {
 }
 
 export function createAdminEvent(payload: CreateAdminEventInput, accessToken: string, userId: string) {
-  return backendRequest<{ event: AdminEvent }>('/api/admin/events', {
+  return backendRequest<{ event: AdminEvent }>('/api/events/create', {
     method: 'POST',
     body: payload,
     accessToken,

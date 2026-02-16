@@ -111,6 +111,7 @@ export default function AdminPage() {
   const [showEnded, setShowEnded] = useState(false);
   const [formErrors, setFormErrors] = useState<{ code?: string; name?: string; scenarioId?: string }>({});
   const [scenarioLoadError, setScenarioLoadError] = useState<string | null>(null);
+  const [scenarioReloadKey, setScenarioReloadKey] = useState(0);
   const [form, setForm] = useState({
     code: 'KENTINVEST01',
     name: '',
@@ -171,7 +172,7 @@ export default function AdminPage() {
     };
 
     void loadScenarios();
-  }, []);
+  }, [scenarioReloadKey]);
 
   const grouped = useMemo(() => {
     const drafts = events.filter((row) => normalizeState(row.state) === 'draft');
@@ -293,6 +294,19 @@ export default function AdminPage() {
         </div>
       </header>
 
+      <article className="mb-6 rounded-2xl border border-white/10 bg-slate-900/70 p-5">
+        <h2 className="text-lg font-semibold">Config debug</h2>
+        <p className="mt-2 text-sm text-slate-300">Boolean env presence (no secret values).</p>
+        <dl className="mt-3 grid gap-2 text-sm text-slate-200 sm:grid-cols-2 lg:grid-cols-3">
+          <div><dt className="text-slate-400">VITE_BACKEND_URL</dt><dd>{String(Boolean(appEnv.backendUrl))}</dd></div>
+          <div><dt className="text-slate-400">VITE_SUPABASE_URL</dt><dd>{String(Boolean(appEnv.supabaseUrl))}</dd></div>
+          <div><dt className="text-slate-400">VITE_SUPABASE_ANON_KEY</dt><dd>{String(Boolean(appEnv.supabaseAnonKey))}</dd></div>
+          <div><dt className="text-slate-400">VITE_PORTFOLIO_SIM_URL</dt><dd>{String(Boolean(appEnv.portfolioSimUrl))}</dd></div>
+          <div><dt className="text-slate-400">VITE_PORTFOLIO_SIM_METADATA_URL</dt><dd>{String(Boolean(appEnv.portfolioSimMetadataUrl))}</dd></div>
+          <div><dt className="text-slate-400">VITE_ADMIN_ALLOWLIST_EMAILS</dt><dd>{String(Boolean(appEnv.adminAllowlistEmails))}</dd></div>
+        </dl>
+      </article>
+
       <div className="grid gap-6 lg:grid-cols-[1fr_1.3fr]">
         <article className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
           <h2 className="text-lg font-semibold">Create Event</h2>
@@ -383,7 +397,18 @@ export default function AdminPage() {
           </form>
           {toast && <p className="mt-3 text-sm text-mint">{toast}</p>}
           {error && <p className="mt-3 rounded-lg border border-rose-400/25 bg-rose-900/20 p-3 text-sm text-rose-200">{error}</p>}
-          {scenarioLoadError && <p className="mt-3 text-sm text-rose-200">{scenarioLoadError}</p>}
+          {scenarioLoadError && (
+            <div className="mt-3 rounded-lg border border-rose-300/25 bg-rose-900/20 p-3">
+              <p className="text-sm text-rose-200">{scenarioLoadError}</p>
+              <button
+                type="button"
+                className="mt-2 rounded-lg border border-white/20 px-3 py-1.5 text-xs text-slate-200 hover:border-mint/40 hover:text-mint"
+                onClick={() => setScenarioReloadKey((current) => current + 1)}
+              >
+                Retry
+              </button>
+            </div>
+          )}
         </article>
 
         <article className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
