@@ -81,7 +81,12 @@ export default function MultiplayerPage() {
 
   const handleJoin = async (event: FormEvent) => {
     event.preventDefault();
-    if (!user || !accessToken || !eventCode.trim()) {
+    if (!user || !accessToken) {
+      setError('Please sign in to join');
+      return;
+    }
+
+    if (!eventCode.trim()) {
       return;
     }
 
@@ -89,7 +94,7 @@ export default function MultiplayerPage() {
       setJoining(true);
       setError(null);
       const createdRun = await createRunByCode(eventCode.trim().toUpperCase());
-      window.open(createdRun.simUrl, '_blank', 'noopener,noreferrer');
+      window.open(createdRun.launchUrl, '_blank', 'noopener,noreferrer');
       setToast('Run created — sim opened in new tab');
       setEventCode('');
 

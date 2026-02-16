@@ -37,7 +37,7 @@ async function backendRequest<T>(path: string, options: BackendOptions = {}) {
 
   if (!response.ok) {
     if (!hasBody) {
-      throw new Error('Backend request failed');
+      throw new Error(`Backend request failed (${response.status} ${response.statusText})`);
     }
 
     throw new Error(toReadableError(rawBody));
@@ -47,19 +47,44 @@ async function backendRequest<T>(path: string, options: BackendOptions = {}) {
     throw new Error('Backend response was empty.');
   }
 
-  return JSON.parse(rawBody) as T;
+  try {
+    return JSON.parse(rawBody) as T;
+  } catch {
+    throw new Error(`Backend returned a non-JSON response (${response.status} ${response.statusText}).`);
+  }
 }
 
 export interface CreateRunResponse {
   runId: string;
-  simUrl: string;
+  launchUrl: string;
 }
 
-export function createRunByCode(eventCode: string) {
-  return backendRequest<CreateRunResponse>('/api/runs/create', {
+interface CreateRunApiResponse {
+  runId?: string;
+  run_id?: string;
+  simUrl?: string;
+  sim_url?: string;
+  launchUrl?: string;
+  launch_url?: string;
+}
+
+export async function createRunByCode(eventCode: string) {
+  const response = await backendRequest<CreateRunApiResponse>('/api/runs/create', {
     method: 'POST',
     body: { eventCode },
   });
+
+  const runId = response.runId ?? response.run_id;
+  const launchUrl = response.launchUrl ?? response.launch_url ?? response.simUrl ?? response.sim_url;
+
+  if (!runId || !launchUrl) {
+    throw new Error('Backend response missing run_id or launch_url.');
+  }
+
+  return {
+    runId,
+    launchUrl,
+  } satisfies CreateRunResponse;
 }
 
 export interface LeaderboardEntry {
