@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 
 interface AuthPageProps {
@@ -15,9 +15,13 @@ export default function AuthPage({ type }: AuthPageProps) {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { signIn, signUp } = useSupabaseAuth();
+  const { user, loading: authLoading, signIn, signUp } = useSupabaseAuth();
 
   const fromPath = (location.state as { from?: string } | null)?.from ?? '/multiplayer';
+
+  if (!authLoading && user) {
+    return <Navigate to={fromPath} replace />;
+  }
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();

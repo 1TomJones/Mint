@@ -1,4 +1,5 @@
 import { apiFetch } from './api';
+import { appEnv } from './env';
 
 interface BackendOptions {
   method?: 'GET' | 'POST' | 'PATCH';
@@ -14,6 +15,26 @@ interface BackendErrorPayload {
   [key: string]: unknown;
 }
 
+interface ScenarioMetadataInput {
+  id?: string;
+  scenario_id?: string;
+  name?: string;
+  title?: string;
+  description?: string;
+  default_duration_minutes?: number;
+  duration_minutes?: number;
+  durationMinutes?: number;
+  duration?: number;
+  playerPath?: string;
+  player_path?: string;
+  adminPath?: string;
+  admin_path?: string;
+}
+
+interface ScenarioMetadataResponse {
+  scenarios?: ScenarioMetadataInput[];
+}
+
 function toReadableError(rawBody: string) {
   try {
     const payload = JSON.parse(rawBody) as BackendErrorPayload;
@@ -23,31 +44,41 @@ function toReadableError(rawBody: string) {
   }
 }
 
+function mapBackendError(status: number, rawMessage: string) {
+  if (status === 404) {
+    return `Backend route not deployed. Check backend base path (/api). (HTTP ${status})`;
+  }
+
+  if (/schema_mismatch|scenario_id|duration_minutes|column .* does not exist/i.test(rawMessage)) {
+    return `Supabase schema mismatch. Ensure events table has scenario_id and duration_minutes. (HTTP ${status})`;
+  }
+
+  return `${rawMessage || 'Backend request failed.'} (HTTP ${status})`;
+}
+
 async function backendRequest<T>(path: string, options: BackendOptions = {}) {
+  const headers: Record<string, string> = {
+    ...(options.accessToken ? { Authorization: `Bearer ${options.accessToken}` } : {}),
+    ...(options.userId ? { 'x-user-id': options.userId } : {}),
+  };
+
   const response = await apiFetch(path, {
     method: options.method ?? 'GET',
     body: options.body,
     requireAuth: options.requireAuth,
-    includeUserIdHeader: !!options.userId,
-    headers: {
-      ...(options.accessToken ? { Authorization: `Bearer ${options.accessToken}` } : {}),
-      ...(options.userId ? { 'x-user-id': options.userId } : {}),
-    },
+    headers,
   });
 
   const rawBody = await response.text();
   const hasBody = !!rawBody.trim() && response.headers.get('content-length') !== '0';
 
   if (!response.ok) {
-    if (!hasBody) {
-      throw new Error(`Backend request failed (${response.status} ${response.statusText})`);
-    }
-
-    throw new Error(toReadableError(rawBody));
+    const parsedMessage = hasBody ? toReadableError(rawBody) : response.statusText;
+    throw new Error(mapBackendError(response.status, parsedMessage));
   }
 
   if (!hasBody) {
-    throw new Error('Backend response was empty.');
+    throw new Error(`Backend response was empty. (HTTP ${response.status})`);
   }
 
   try {
@@ -62,66 +93,49 @@ export interface ScenarioMetadata {
   title: string;
   description: string;
   default_duration_minutes: number | null;
+  player_path: string;
+  admin_path: string;
 }
 
-interface ScenarioMetadataResponse {
-  scenarios?: Array<{
-    id?: string;
-    scenario_id?: string;
-    name?: string;
-    title?: string;
-    description?: string;
-    default_duration_minutes?: number;
-    duration_minutes?: number;
-    duration?: number;
-  }>;
-}
+function parseScenarioMetadata(payload: ScenarioMetadataResponse | ScenarioMetadataInput[]) {
+  const list = Array.isArray(payload) ? payload : payload.scenarios ?? [];
 
-const simBaseUrl = (import.meta.env.VITE_PORTFOLIO_SIM_URL as string | undefined)?.replace(/\/$/, '') ?? '';
-
-function parseScenarioMetadata(payload: ScenarioMetadataResponse) {
-  return (payload.scenarios ?? [])
+  return list
     .map((scenario) => {
       const id = scenario.id?.trim() || scenario.scenario_id?.trim() || '';
       if (!id) {
         return null;
       }
 
+      const playerPath = scenario.playerPath?.trim() || scenario.player_path?.trim() || '/';
+      const adminPath = scenario.adminPath?.trim() || scenario.admin_path?.trim() || '/admin.html';
+
       return {
         id,
         title: scenario.title?.trim() || scenario.name?.trim() || id,
         description: scenario.description?.trim() || 'No description provided.',
         default_duration_minutes: Number(
-          scenario.default_duration_minutes ?? scenario.duration_minutes ?? scenario.duration ?? 0,
+          scenario.default_duration_minutes ?? scenario.duration_minutes ?? scenario.durationMinutes ?? scenario.duration ?? 0,
         ) || null,
+        player_path: playerPath.startsWith('/') ? playerPath : `/${playerPath}`,
+        admin_path: adminPath.startsWith('/') ? adminPath : `/${adminPath}`,
       } satisfies ScenarioMetadata;
     })
     .filter((scenario): scenario is ScenarioMetadata => !!scenario);
 }
 
 export async function fetchPortfolioScenarioMetadata() {
-  if (!simBaseUrl) {
-    throw new Error('Missing VITE_PORTFOLIO_SIM_URL');
+  if (!appEnv.portfolioSimMetadataUrl) {
+    throw new Error('VITE_PORTFOLIO_SIM_METADATA_URL is not configured.');
   }
 
-  const candidates = [`${simBaseUrl}/metadata`, `${simBaseUrl}/metadata.json`];
-  let lastError: unknown = null;
-
-  for (const url of candidates) {
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`${response.status} ${response.statusText}`);
-      }
-
-      const payload = (await response.json()) as ScenarioMetadataResponse;
-      return parseScenarioMetadata(payload);
-    } catch (error) {
-      lastError = error;
-    }
+  const response = await fetch(appEnv.portfolioSimMetadataUrl);
+  if (!response.ok) {
+    throw new Error(mapBackendError(response.status, `${response.status} ${response.statusText}`));
   }
 
-  throw lastError instanceof Error ? lastError : new Error('Failed to load metadata');
+  const payload = (await response.json()) as ScenarioMetadataResponse | ScenarioMetadataInput[];
+  return parseScenarioMetadata(payload);
 }
 
 export interface CreateRunResponse {
@@ -138,11 +152,13 @@ interface CreateRunApiResponse {
   launch_url?: string;
 }
 
-export async function createRunByCode(eventCode: string, accessToken?: string) {
+export async function createRunByCode(eventCode: string, userId: string, accessToken?: string) {
   const response = await backendRequest<CreateRunApiResponse>('/api/runs/create', {
     method: 'POST',
-    body: { eventCode },
+    body: { event_code: eventCode },
     accessToken,
+    userId,
+    requireAuth: true,
   });
 
   const runId = response.runId ?? response.run_id;
@@ -253,19 +269,20 @@ export function fetchAdminEvents(accessToken: string) {
 }
 
 export interface CreateAdminEventInput {
-  code: string;
-  name: string;
+  event_code: string;
+  event_name: string;
   scenario_id: string;
   duration_minutes: number;
   sim_url: string;
 }
 
-export function createAdminEvent(payload: CreateAdminEventInput, accessToken: string, userId?: string) {
-  return backendRequest<{ event: AdminEvent }>('/api/events/create', {
+export function createAdminEvent(payload: CreateAdminEventInput, accessToken: string, userId: string) {
+  return backendRequest<{ event: AdminEvent }>('/api/admin/events', {
     method: 'POST',
     body: payload,
     accessToken,
     userId,
+    requireAuth: true,
   });
 }
 
@@ -286,14 +303,6 @@ export interface PublicEvent {
 export function fetchPublicEvents() {
   return backendRequest<{ events: PublicEvent[] }>('/api/events/public', {
     requireAuth: false,
-  });
-}
-
-export function fetchSimAdminLink(eventCode: string, accessToken: string) {
-  return backendRequest<{ adminUrl: string }>('/api/admin/sim-admin-link', {
-    method: 'POST',
-    body: { eventCode },
-    accessToken,
   });
 }
 

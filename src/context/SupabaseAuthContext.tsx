@@ -1,58 +1,36 @@
 import { ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { fetchAdminStatus } from '../lib/backendApi';
-import { SupabaseSession, getCurrentUser, signInWithEmail, signUpWithEmail } from '../lib/supabase';
+import { appEnv } from '../lib/env';
+import { AuthUser, Session, supabase } from '../lib/supabase';
 
-const STORAGE_KEY = 'mint.supabase.session';
-const adminAllowlist = (import.meta.env.VITE_ADMIN_ALLOWLIST_EMAILS as string | undefined)
-  ?.split(',')
+const adminAllowlist = appEnv.adminAllowlistEmails
+  .split(',')
   .map((value) => value.trim().toLowerCase())
-  .filter(Boolean) ?? [];
-
-interface AuthUser {
-  id: string;
-  email?: string;
-}
-
-interface StoredSession {
-  access_token: string;
-  refresh_token?: string;
-  user: AuthUser;
-}
+  .filter(Boolean);
 
 interface SupabaseAuthContextValue {
   user: AuthUser | null;
-  session: StoredSession | null;
+  session: Session | null;
   accessToken: string | null;
   loading: boolean;
   isAdmin: boolean;
   adminLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<{ needsEmailConfirmation: boolean }>;
-  signOut: () => void;
+  signOut: () => Promise<void>;
 }
 
 const SupabaseAuthContext = createContext<SupabaseAuthContextValue | null>(null);
 
-function toStoredSession(session: SupabaseSession): StoredSession {
+function toAuthUser(user: AuthUser | null): AuthUser | null {
+  if (!user) {
+    return null;
+  }
+
   return {
-    access_token: session.access_token,
-    refresh_token: session.refresh_token,
-    user: session.user,
+    id: user.id,
+    email: user.email,
   };
-}
-
-function readStoredSession(): StoredSession | null {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(raw) as StoredSession;
-  } catch {
-    localStorage.removeItem(STORAGE_KEY);
-    return null;
-  }
 }
 
 function isAllowlistedAdmin(email?: string) {
@@ -60,13 +38,9 @@ function isAllowlistedAdmin(email?: string) {
   return !!normalizedEmail && adminAllowlist.includes(normalizedEmail);
 }
 
-function emitAuthStateChange() {
-  window.dispatchEvent(new CustomEvent('mint-auth-state-change'));
-}
-
 export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [session, setSession] = useState<StoredSession | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -76,49 +50,38 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     let active = true;
 
     const bootstrap = async () => {
-      const stored = readStoredSession();
-      if (!stored) {
-        if (active) {
-          setLoading(false);
-          setAdminLoading(false);
-        }
+      const { data, error } = await supabase.auth.getSession();
+      if (!active) {
         return;
       }
 
-      try {
-        const currentUser = await getCurrentUser(stored.access_token);
-        if (!active) {
-          return;
-        }
-        setSession(stored);
-        setAccessToken(stored.access_token);
-        setUser(currentUser);
-      } catch {
-        localStorage.removeItem(STORAGE_KEY);
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
+      if (error) {
+        console.error('[auth] failed to get initial session', error);
       }
+
+      const initialSession = data.session ?? null;
+      setSession(initialSession);
+      setAccessToken(initialSession?.access_token ?? null);
+      setUser(toAuthUser(initialSession?.user ?? null));
+      setLoading(false);
     };
 
     void bootstrap();
 
-    const syncSessionState = () => {
-      const stored = readStoredSession();
-      setSession(stored);
-      setAccessToken(stored?.access_token ?? null);
-      setUser(stored?.user ?? null);
-      setLoading(false);
-    };
+    const { data: authSubscription } = supabase.auth.onAuthStateChange((_event, updatedSession) => {
+      if (!active) {
+        return;
+      }
 
-    window.addEventListener('storage', syncSessionState);
-    window.addEventListener('mint-auth-state-change', syncSessionState);
+      setSession(updatedSession ?? null);
+      setAccessToken(updatedSession?.access_token ?? null);
+      setUser(toAuthUser(updatedSession?.user ?? null));
+      setLoading(false);
+    });
 
     return () => {
       active = false;
-      window.removeEventListener('storage', syncSessionState);
-      window.removeEventListener('mint-auth-state-change', syncSessionState);
+      authSubscription.subscription.unsubscribe();
     };
   }, []);
 
@@ -159,37 +122,28 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       isAdmin,
       adminLoading,
       signIn: async (email: string, password: string) => {
-        const signedInSession = await signInWithEmail(email, password);
-        const stored = toStoredSession(signedInSession);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
-        setSession(stored);
-        setUser(signedInSession.user);
-        setAccessToken(signedInSession.access_token);
-        emitAuthStateChange();
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+          throw new Error(error.message);
+        }
       },
       signUp: async (email: string, password: string) => {
-        const result = await signUpWithEmail(email, password);
-
-        if ('access_token' in result) {
-          const stored = toStoredSession(result);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
-          setSession(stored);
-          setUser(result.user);
-          setAccessToken(result.access_token);
-          emitAuthStateChange();
-          return { needsEmailConfirmation: false };
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) {
+          throw new Error(error.message);
         }
 
-        return { needsEmailConfirmation: true };
+        return { needsEmailConfirmation: !data.session };
       },
-      signOut: () => {
-        localStorage.removeItem(STORAGE_KEY);
+      signOut: async () => {
+        const { error } = await supabase.auth.signOut();
+        if (error) {
+          throw new Error(error.message);
+        }
         setSession(null);
         setUser(null);
         setAccessToken(null);
         setIsAdmin(false);
-        setAdminLoading(false);
-        emitAuthStateChange();
       },
     }),
     [accessToken, adminLoading, isAdmin, loading, session, user],

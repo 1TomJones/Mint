@@ -9,8 +9,7 @@ import {
   type ScenarioMetadata,
 } from '../lib/backendApi';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
-
-const simBaseUrl = (import.meta.env.VITE_PORTFOLIO_SIM_URL as string | undefined)?.replace(/\/$/, '') ?? '';
+import { appEnv } from '../lib/env';
 
 function normalizeState(state: string | null | undefined) {
   const normalized = (state ?? 'draft').toLowerCase();
@@ -93,7 +92,7 @@ function EventCard({
             <button disabled={isBusy} onClick={() => void onStateChange(event.code, 'ended')} className="rounded-lg border border-rose-400/40 px-3 py-1.5 text-xs text-rose-300 disabled:opacity-60">End</button>
           </>
         )}
-        <button disabled={isBusy} onClick={() => onJoinAsAdmin(event)} className="rounded-lg border border-mint/40 px-3 py-1.5 text-xs text-mint disabled:opacity-60">Join as admin</button>
+        <button disabled={isBusy} onClick={() => onJoinAsAdmin(event)} className="rounded-lg border border-mint/40 px-3 py-1.5 text-xs text-mint disabled:opacity-60">Admin Join</button>
         <button disabled={isBusy} onClick={() => void onCopyCode(event.code)} className="rounded-lg border border-white/20 px-3 py-1.5 text-xs text-slate-200 disabled:opacity-60">Copy Player Code</button>
       </div>
     </article>
@@ -117,6 +116,7 @@ export default function AdminPage() {
     name: '',
     scenarioId: '',
     durationMinutes: 45,
+    simUrl: appEnv.portfolioSimUrl,
   });
 
   const canLoad = !!accessToken && !!user && isAdmin;
@@ -166,7 +166,7 @@ export default function AdminPage() {
       } catch (loadError) {
         console.error('[AdminPage] metadata fetch failed', loadError);
         setScenarios([]);
-        setScenarioLoadError('Cannot load scenarios');
+        setScenarioLoadError(loadError instanceof Error ? loadError.message : 'Cannot load scenarios');
       }
     };
 
@@ -212,7 +212,7 @@ export default function AdminPage() {
 
   const handleCreateEvent = async (event: FormEvent) => {
     event.preventDefault();
-    if (!accessToken || !validateForm()) return;
+    if (!accessToken || !user || !validateForm()) return;
 
     try {
       setFormLoading(true);
@@ -220,13 +220,14 @@ export default function AdminPage() {
       const eventCode = form.code.trim().toUpperCase();
       await createAdminEvent(
         {
-          code: eventCode,
-          name: form.name.trim(),
+          event_code: eventCode,
+          event_name: form.name.trim(),
           scenario_id: form.scenarioId,
           duration_minutes: Number(form.durationMinutes),
-          sim_url: simBaseUrl,
+          sim_url: form.simUrl.trim(),
         },
         accessToken,
+        user.id,
       );
       setToast(`Event ${eventCode} created.`);
       const latestEvents = await loadEvents();
@@ -261,17 +262,14 @@ export default function AdminPage() {
 
   const handleJoinAsAdmin = (event: AdminEvent) => {
     try {
-      const adminBaseUrl = event.sim_url.endsWith('/') ? `${event.sim_url}admin.html` : `${event.sim_url}/admin.html`;
-      const adminUrl = new URL(adminBaseUrl);
-      adminUrl.searchParams.set('event_id', event.id);
-      adminUrl.searchParams.set('code', event.code);
-      if (event.scenario_id) {
-        adminUrl.searchParams.set('scenario_id', event.scenario_id);
-      }
-      window.open(adminUrl.toString(), '_blank', 'noopener,noreferrer');
+      const scenario = scenarios.find((item) => item.id === event.scenario_id);
+      const adminPath = scenario?.admin_path || '/admin.html';
+      const adminPathNormalized = adminPath.startsWith('/') ? adminPath : `/${adminPath}`;
+      const adminUrl = `${event.sim_url.replace(/\/$/, '')}${adminPathNormalized}?event_code=${encodeURIComponent(event.code)}&role=admin`;
+      window.open(adminUrl, '_blank', 'noopener,noreferrer');
     } catch (openError) {
       console.error('[AdminPage] failed to open admin URL', openError);
-      setError('Could not open admin URL.');
+      setError('Could not open admin URL. (HTTP 0)');
     }
   };
 
@@ -350,6 +348,16 @@ export default function AdminPage() {
                 ))}
               </select>
               {formErrors.scenarioId && <p className="mt-1 text-xs text-rose-300">{formErrors.scenarioId}</p>}
+            </label>
+            <label className="block text-sm text-slate-300">
+              Sim URL
+              <input
+                value={form.simUrl}
+                onChange={(event) => setForm((current) => ({ ...current, simUrl: event.target.value }))}
+                className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-2.5"
+                placeholder="https://portfolio-sim-5y85.onrender.com"
+                required
+              />
             </label>
             {selectedScenario && (
               <div className="rounded-xl border border-white/10 bg-slate-950/70 p-3 text-sm text-slate-300">

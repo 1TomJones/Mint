@@ -1,8 +1,10 @@
+import { useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import { AuthMockProvider } from './context/AuthMockContext';
 import { SupabaseAuthProvider } from './context/SupabaseAuthContext';
 import Layout from './layout/Layout';
+import { getMissingEnvVars, logEnvDebugStatus } from './lib/env';
 import AboutPage from './pages/AboutPage';
 import AdminPage from './pages/AdminPage';
 import AuthPage from './pages/AuthPage';
@@ -20,11 +22,33 @@ import PricingPage from './pages/PricingPage';
 import ProductsPage from './pages/ProductsPage';
 import SimulationsPage from './pages/SimulationsPage';
 
+function EnvErrorBanner() {
+  const missingVars = getMissingEnvVars();
+
+  if (!missingVars.length) {
+    return null;
+  }
+
+  return (
+    <div className="container-wide py-4">
+      <div className="rounded-xl border border-amber-300/30 bg-amber-900/20 p-4 text-sm text-amber-100">
+        <p className="font-semibold">Environment configuration warning</p>
+        <p className="mt-1">Missing env vars: {missingVars.join(', ')}.</p>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  useEffect(() => {
+    logEnvDebugStatus();
+  }, []);
+
   return (
     <SupabaseAuthProvider>
       <AuthMockProvider>
         <Layout>
+          <EnvErrorBanner />
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/products" element={<ProductsPage />} />
