@@ -2,7 +2,13 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 import { RunRow, fetchUserRuns } from '../lib/supabase';
-import { createRunByCode, fetchPublicEvents, type PublicEvent } from '../lib/backendApi';
+import {
+  createRunByCode,
+  fetchPortfolioScenarioMetadata,
+  fetchPublicEvents,
+  type PublicEvent,
+  type ScenarioMetadata,
+} from '../lib/backendApi';
 
 function formatMetric(value: number | null | undefined) {
   if (value === null || value === undefined) {
@@ -12,37 +18,32 @@ function formatMetric(value: number | null | undefined) {
   return Number(value).toFixed(2);
 }
 
-function formatErrorMessage(message: string) {
-  try {
-    const parsed = JSON.parse(message) as Record<string, unknown>;
-    return JSON.stringify(parsed, null, 2);
-  } catch {
-    return message;
-  }
-}
-
 export default function MultiplayerPage() {
   const { user, accessToken } = useSupabaseAuth();
   const [searchParams] = useSearchParams();
   const [eventCode, setEventCode] = useState('');
   const [events, setEvents] = useState<PublicEvent[]>([]);
   const [runs, setRuns] = useState<RunRow[]>([]);
+  const [scenarios, setScenarios] = useState<ScenarioMetadata[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
   const [runsLoading, setRunsLoading] = useState(true);
   const [joining, setJoining] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [scenarioError, setScenarioError] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
       try {
         setEventsLoading(true);
-        const eventsData = await fetchPublicEvents();
+        const [eventsData, metadata] = await Promise.all([fetchPublicEvents(), fetchPortfolioScenarioMetadata()]);
         setEvents(eventsData.events);
+        setScenarios(metadata);
+        setScenarioError(null);
       } catch (loadError) {
-        const message = loadError instanceof Error ? loadError.message : 'Failed to load multiplayer data.';
-        setError(`${formatErrorMessage(message)}
-Admin: check Supabase schema (scenario_id, duration_minutes)`);
+        console.error('[MultiplayerPage] Failed to load events/metadata', loadError);
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load multiplayer data.');
+        setScenarioError('Cannot load scenarios');
       } finally {
         setEventsLoading(false);
       }
@@ -57,6 +58,7 @@ Admin: check Supabase schema (scenario_id, duration_minutes)`);
         const runsData = await fetchUserRuns(user.id, accessToken);
         setRuns(runsData);
       } catch (loadError) {
+        console.error('[MultiplayerPage] Failed to load run history', loadError);
         setError(loadError instanceof Error ? loadError.message : 'Failed to load run history.');
       } finally {
         setRunsLoading(false);
@@ -67,6 +69,7 @@ Admin: check Supabase schema (scenario_id, duration_minutes)`);
   }, [accessToken, user]);
 
   const activeEvents = useMemo(() => events.filter((event) => ['active', 'live', 'paused'].includes((event.state ?? '').toLowerCase())), [events]);
+  const scenarioById = useMemo(() => new Map(scenarios.map((scenario) => [scenario.id, scenario.title])), [scenarios]);
 
   useEffect(() => {
     const prefilledCode = searchParams.get('code');
@@ -103,9 +106,8 @@ Admin: check Supabase schema (scenario_id, duration_minutes)`);
       const updatedRuns = await fetchUserRuns(user.id, accessToken);
       setRuns(updatedRuns);
     } catch (joinError) {
-      const message = joinError instanceof Error ? joinError.message : 'Unable to join event.';
-      setError(`${formatErrorMessage(message)}
-Admin: check Supabase schema (scenario_id, duration_minutes)`);
+      console.error('[MultiplayerPage] Join event failed', joinError);
+      setError(joinError instanceof Error ? joinError.message : 'Unable to join event.');
     } finally {
       setJoining(false);
       setTimeout(() => setToast(null), 3500);
@@ -154,7 +156,7 @@ Admin: check Supabase schema (scenario_id, duration_minutes)`);
               </p>
             )}
             <form className="mt-4 flex flex-col gap-3 sm:flex-row" onSubmit={handleJoin}>
-              <input disabled={!user} value={eventCode} onChange={(event) => setEventCode(event.target.value)} className="flex-1 rounded-xl border border-white/10 bg-slate-950 px-4 py-2.5 uppercase disabled:opacity-60" placeholder="Event Code" />
+              <input disabled={!user} value={eventCode} onChange={(event) => setEventCode(event.target.value)} className="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-2.5 uppercase disabled:opacity-60" placeholder="Event Code" />
               <button disabled={joining || !user} className="rounded-xl2 bg-mint px-5 py-2.5 text-sm font-semibold text-slate-900 disabled:opacity-60">
                 {joining ? 'Joining…' : 'Join'}
               </button>
@@ -165,7 +167,8 @@ Admin: check Supabase schema (scenario_id, duration_minutes)`);
               </Link>
             )}
             {toast && <p className="mt-3 text-sm text-mint">{toast}</p>}
-            {error && <pre className="mt-3 whitespace-pre-wrap rounded-lg border border-rose-300/20 bg-rose-900/20 p-3 text-sm text-rose-200">{error}</pre>}
+            {error && <p className="mt-3 rounded-lg border border-rose-300/20 bg-rose-900/20 p-3 text-sm text-rose-200">{error}</p>}
+            {scenarioError && <p className="mt-3 text-sm text-rose-200">{scenarioError}</p>}
           </article>
 
           <article className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
@@ -226,6 +229,7 @@ Admin: check Supabase schema (scenario_id, duration_minutes)`);
           <div className="mt-4 space-y-3">
             {activeEvents.slice(0, 8).map((event) => {
               const isSelected = eventCode.trim().toUpperCase() === event.code;
+              const scenarioTitle = event.scenario_id ? (scenarioById.get(event.scenario_id) ?? event.scenario_id) : '—';
 
               return (
                 <div
@@ -234,7 +238,7 @@ Admin: check Supabase schema (scenario_id, duration_minutes)`);
                   tabIndex={0}
                   onClick={() => handleUseEventCode(event.code)}
                   onKeyDown={(keyboardEvent) => {
-                    if (keyboardEvent.key === "Enter" || keyboardEvent.key === " ") {
+                    if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
                       keyboardEvent.preventDefault();
                       handleUseEventCode(event.code);
                     }
@@ -243,7 +247,7 @@ Admin: check Supabase schema (scenario_id, duration_minutes)`);
                 >
                   <p className="text-sm font-medium">{event.name}</p>
                   <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-400">Code: {event.code}</p>
-                  <p className="mt-1 text-xs text-slate-300">Scenario: {event.scenario_id ?? '—'}</p>
+                  <p className="mt-1 text-xs text-slate-300">Scenario: {scenarioTitle}</p>
                   <p className="mt-1 text-xs text-slate-300">Duration: {event.duration_minutes ?? '—'} min</p>
                   <div className="mt-3 flex items-center gap-3 text-sm">
                     <span className="rounded-lg border border-mint/40 px-3 py-1.5 text-mint">{isSelected ? 'Selected' : 'Select event'}</span>

@@ -57,6 +57,73 @@ async function backendRequest<T>(path: string, options: BackendOptions = {}) {
   }
 }
 
+export interface ScenarioMetadata {
+  id: string;
+  title: string;
+  description: string;
+  default_duration_minutes: number | null;
+}
+
+interface ScenarioMetadataResponse {
+  scenarios?: Array<{
+    id?: string;
+    scenario_id?: string;
+    name?: string;
+    title?: string;
+    description?: string;
+    default_duration_minutes?: number;
+    duration_minutes?: number;
+    duration?: number;
+  }>;
+}
+
+const simBaseUrl = (import.meta.env.VITE_PORTFOLIO_SIM_URL as string | undefined)?.replace(/\/$/, '') ?? '';
+
+function parseScenarioMetadata(payload: ScenarioMetadataResponse) {
+  return (payload.scenarios ?? [])
+    .map((scenario) => {
+      const id = scenario.id?.trim() || scenario.scenario_id?.trim() || '';
+      if (!id) {
+        return null;
+      }
+
+      return {
+        id,
+        title: scenario.title?.trim() || scenario.name?.trim() || id,
+        description: scenario.description?.trim() || 'No description provided.',
+        default_duration_minutes: Number(
+          scenario.default_duration_minutes ?? scenario.duration_minutes ?? scenario.duration ?? 0,
+        ) || null,
+      } satisfies ScenarioMetadata;
+    })
+    .filter((scenario): scenario is ScenarioMetadata => !!scenario);
+}
+
+export async function fetchPortfolioScenarioMetadata() {
+  if (!simBaseUrl) {
+    throw new Error('Missing VITE_PORTFOLIO_SIM_URL');
+  }
+
+  const candidates = [`${simBaseUrl}/metadata`, `${simBaseUrl}/metadata.json`];
+  let lastError: unknown = null;
+
+  for (const url of candidates) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText}`);
+      }
+
+      const payload = (await response.json()) as ScenarioMetadataResponse;
+      return parseScenarioMetadata(payload);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Failed to load metadata');
+}
+
 export interface CreateRunResponse {
   runId: string;
   launchUrl: string;
@@ -186,10 +253,11 @@ export function fetchAdminEvents(accessToken: string) {
 }
 
 export interface CreateAdminEventInput {
-  event_code: string;
-  event_name: string;
+  code: string;
+  name: string;
   scenario_id: string;
   duration_minutes: number;
+  sim_url: string;
 }
 
 export function createAdminEvent(payload: CreateAdminEventInput, accessToken: string, userId?: string) {

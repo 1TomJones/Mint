@@ -1,4 +1,4 @@
-const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.replace(/\/$/, '');
+const backendUrl = ((import.meta.env.VITE_API_URL as string | undefined) ?? (import.meta.env.VITE_BACKEND_URL as string | undefined))?.replace(/\/$/, '');
 const SESSION_STORAGE_KEY = 'mint.supabase.session';
 
 type ApiMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
@@ -33,7 +33,7 @@ function readSessionUserId() {
 
 export async function apiFetch(path: string, options: ApiFetchOptions = {}) {
   if (!backendUrl) {
-    throw new Error('Missing VITE_BACKEND_URL environment variable.');
+    throw new Error('Missing VITE_API_URL environment variable.');
   }
 
   const userId = readSessionUserId();
