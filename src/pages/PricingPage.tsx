@@ -1,5 +1,6 @@
 import { PrimaryButton } from '../components/Buttons';
 import { PageHero } from './Shared';
+import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 
 const tiers = [
   { name: 'Core', price: '$39', detail: 'Simulations + starter coursework.' },
@@ -8,6 +9,8 @@ const tiers = [
 ];
 
 export default function PricingPage() {
+  const { user, loading, isAdmin } = useSupabaseAuth();
+
   return (
     <>
       <PageHero title="Pricing" subtitle="Simple tiers designed for individual operators and selective advanced access." />
@@ -17,7 +20,7 @@ export default function PricingPage() {
             <h3 className="text-lg font-semibold">{tier.name}</h3>
             <p className="mt-2 text-3xl font-semibold">{tier.price}<span className="text-base text-slate-400">/mo</span></p>
             <p className="mt-3 text-sm text-slate-300">{tier.detail}</p>
-            <div className="mt-6"><PrimaryButton href="/signup">Choose plan</PrimaryButton></div>
+            <div className="mt-6">{loading ? null : <PrimaryButton href={user ? (isAdmin ? '/admin' : '/multiplayer') : '/signup'}>{user ? 'Go to account' : 'Choose plan'}</PrimaryButton>}</div>
           </article>
         ))}
       </section>

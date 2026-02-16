@@ -123,7 +123,7 @@ app.get('/api/admin/events', async (req, res) => {
   try {
     let query = supabase
       .from('events')
-      .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at')
+      .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at,started_at,ended_at')
       .order('created_at', { ascending: false });
 
     let { data: events, error } = await query;
@@ -131,7 +131,7 @@ app.get('/api/admin/events', async (req, res) => {
     if (error && isMissingColumnError(error)) {
       const fallback = await supabase
         .from('events')
-        .select('id,code,name,sim_url,created_at,starts_at,ends_at')
+        .select('id,code,name,sim_url,created_at,starts_at,ends_at,started_at,ended_at')
         .order('created_at', { ascending: false });
       events = (fallback.data ?? []).map((event) => ({
         ...event,
@@ -176,14 +176,14 @@ app.post('/api/admin/events', async (req, res) => {
     let insertResult = await supabase
       .from('events')
       .insert(payload)
-      .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at')
+      .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at,started_at,ended_at')
       .single();
 
     if (insertResult.error && isMissingColumnError(insertResult.error)) {
       insertResult = await supabase
         .from('events')
         .insert({ code: payload.code, name: payload.name, sim_url: payload.sim_url })
-        .select('id,code,name,sim_url,created_at,starts_at,ends_at')
+        .select('id,code,name,sim_url,created_at,starts_at,ends_at,started_at,ended_at')
         .single();
       if (!insertResult.error && insertResult.data) {
         insertResult.data = {
@@ -203,6 +203,143 @@ app.post('/api/admin/events', async (req, res) => {
     return res.status(201).json({ event: insertResult.data });
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to create event' });
+  }
+});
+
+
+app.post('/api/events', async (req, res) => {
+  if (!(await requireAdmin(req, res))) {
+    return;
+  }
+
+  try {
+    const payload = {
+      code: req.body?.code?.toString().trim().toUpperCase(),
+      name: req.body?.name?.toString().trim(),
+      sim_type: req.body?.sim_type?.toString().trim() || req.body?.simType?.toString().trim() || 'portfolio',
+      scenario_id: req.body?.scenario_id?.toString().trim() || req.body?.scenarioId?.toString().trim() || null,
+      duration_minutes: Number(req.body?.duration_minutes ?? req.body?.durationMinutes ?? 0) || null,
+      state: req.body?.state?.toString().trim() || 'active',
+      sim_url: req.body?.sim_url?.toString().trim() || req.body?.simUrl?.toString().trim() || null,
+    };
+
+    if (!payload.code || !payload.name) {
+      return res.status(400).json({ error: 'code and name are required' });
+    }
+
+    let insertResult = await supabase
+      .from('events')
+      .insert(payload)
+      .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at,started_at,ended_at')
+      .single();
+
+    if (insertResult.error && isMissingColumnError(insertResult.error)) {
+      insertResult = await supabase
+        .from('events')
+        .insert({ code: payload.code, name: payload.name, sim_url: payload.sim_url })
+        .select('id,code,name,sim_url,created_at,starts_at,ends_at')
+        .single();
+      if (!insertResult.error && insertResult.data) {
+        insertResult.data = {
+          ...insertResult.data,
+          sim_type: payload.sim_type,
+          scenario_id: payload.scenario_id,
+          duration_minutes: payload.duration_minutes,
+          state: payload.state,
+          started_at: null,
+          ended_at: null,
+        };
+      }
+    }
+
+    if (insertResult.error) {
+      throw insertResult.error;
+    }
+
+    return res.status(201).json({ event: insertResult.data });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to create event' });
+  }
+});
+
+app.post('/api/admin/events/:code/state', async (req, res) => {
+  if (!(await requireAdmin(req, res))) {
+    return;
+  }
+
+  try {
+    const code = req.params.code?.trim().toUpperCase();
+    const nextState = req.body?.state?.toString().trim().toLowerCase();
+
+    if (!code || !nextState) {
+      return res.status(400).json({ error: 'event code and state are required' });
+    }
+
+    const nowIso = new Date().toISOString();
+    const updatePayload = { state: nextState };
+
+    if (nextState === 'live') {
+      updatePayload.started_at = nowIso;
+    }
+
+    if (nextState === 'ended') {
+      updatePayload.ended_at = nowIso;
+    }
+
+    const { data: event, error } = await supabase
+      .from('events')
+      .update(updatePayload)
+      .eq('code', code)
+      .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at,started_at,ended_at')
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!event) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    return res.json({ event });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to update event state' });
+  }
+});
+
+app.post('/api/admin/sim-admin-link', async (req, res) => {
+  if (!(await requireAdmin(req, res))) {
+    return;
+  }
+
+  try {
+    const eventCode = req.body?.eventCode?.toString().trim().toUpperCase();
+    if (!eventCode) {
+      return res.status(400).json({ error: 'eventCode is required' });
+    }
+
+    const { data: event, error } = await supabase
+      .from('events')
+      .select('code,sim_url')
+      .eq('code', eventCode)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!event?.sim_url) {
+      return res.status(404).json({ error: 'Event or sim_url not found' });
+    }
+
+    const adminBaseUrl = event.sim_url.endsWith('/') ? `${event.sim_url}admin.html` : `${event.sim_url}/admin.html`;
+    const adminUrl = new URL(adminBaseUrl);
+    adminUrl.searchParams.set('event_code', eventCode);
+    adminUrl.searchParams.set('admin_token', simAdminToken);
+
+    return res.json({ adminUrl: adminUrl.toString() });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to generate admin link' });
   }
 });
 

@@ -1,7 +1,7 @@
 const backendUrl = import.meta.env.VITE_BACKEND_URL as string | undefined;
 
 interface BackendOptions {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'PATCH';
   body?: unknown;
   accessToken?: string;
   userId?: string;
@@ -152,6 +152,8 @@ export interface AdminEvent {
   duration_minutes: number | null;
   state: string | null;
   created_at: string;
+  started_at?: string | null;
+  ended_at?: string | null;
 }
 
 export function fetchAdminStatus(accessToken: string) {
@@ -173,7 +175,7 @@ export interface CreateAdminEventInput {
 }
 
 export function createAdminEvent(payload: CreateAdminEventInput, accessToken: string) {
-  return backendRequest<{ event: AdminEvent }>('/api/admin/events', {
+  return backendRequest<{ event: AdminEvent }>('/api/events', {
     method: 'POST',
     body: payload,
     accessToken,
@@ -181,7 +183,17 @@ export function createAdminEvent(payload: CreateAdminEventInput, accessToken: st
 }
 
 export function fetchSimAdminLink(eventCode: string, accessToken: string) {
-  return backendRequest<{ adminUrl: string }>(`/api/admin/events/${encodeURIComponent(eventCode)}/sim-admin-link`, {
+  return backendRequest<{ adminUrl: string }>('/api/admin/sim-admin-link', {
+    method: 'POST',
+    body: { eventCode },
+    accessToken,
+  });
+}
+
+export function updateAdminEventState(eventCode: string, state: 'draft' | 'active' | 'live' | 'paused' | 'ended', accessToken: string) {
+  return backendRequest<{ event: AdminEvent }>(`/api/admin/events/${encodeURIComponent(eventCode)}/state`, {
+    method: 'POST',
+    body: { state },
     accessToken,
   });
 }

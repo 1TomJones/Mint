@@ -1,6 +1,13 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Link, Navigate } from 'react-router-dom';
-import { createAdminEvent, fetchAdminEvents, fetchSimAdminLink } from '../lib/backendApi';
+import { Navigate } from 'react-router-dom';
+import {
+  createAdminEvent,
+  createRunByCode,
+  fetchAdminEvents,
+  fetchSimAdminLink,
+  updateAdminEventState,
+  type AdminEvent,
+} from '../lib/backendApi';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 
 interface ScenarioOption {
@@ -16,21 +23,101 @@ const fallbackScenarios: ScenarioOption[] = [
 
 const simBaseUrl = (import.meta.env.VITE_PORTFOLIO_SIM_URL as string | undefined)?.replace(/\/$/, '') ?? '';
 
+function normalizeState(state: string | null | undefined) {
+  const normalized = (state ?? 'draft').toLowerCase();
+  if (normalized === 'running') {
+    return 'live';
+  }
+  return normalized as 'draft' | 'active' | 'live' | 'paused' | 'ended';
+}
+
+function EventCard({
+  event,
+  onStateChange,
+  onOpenAdmin,
+  onOpenPlayer,
+  busy,
+}: {
+  event: AdminEvent;
+  onStateChange: (eventCode: string, state: 'draft' | 'active' | 'live' | 'paused' | 'ended') => Promise<void>;
+  onOpenAdmin: (eventCode: string) => Promise<void>;
+  onOpenPlayer: (eventCode: string) => Promise<void>;
+  busy: string | null;
+}) {
+  const state = normalizeState(event.state);
+  const isBusy = busy === event.code;
+
+  const stateBadgeClass: Record<string, string> = {
+    draft: 'bg-slate-700 text-slate-100',
+    active: 'bg-mint/20 text-mint',
+    live: 'bg-emerald-500/20 text-emerald-300',
+    paused: 'bg-amber-500/20 text-amber-200',
+    ended: 'bg-slate-600 text-slate-100',
+  };
+
+  return (
+    <article className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{event.code}</p>
+          <h3 className="mt-1 text-lg font-semibold text-slate-100">{event.name}</h3>
+        </div>
+        <span className={`rounded-full px-2 py-1 text-xs ${stateBadgeClass[state] ?? stateBadgeClass.draft}`}>
+          {state}
+        </span>
+      </div>
+
+      <dl className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
+        <div><dt className="text-slate-400">Sim type</dt><dd>{event.sim_type ?? 'portfolio'}</dd></div>
+        <div><dt className="text-slate-400">Scenario</dt><dd>{event.scenario_id ?? '—'}</dd></div>
+        <div><dt className="text-slate-400">Created</dt><dd>{new Date(event.created_at).toLocaleString()}</dd></div>
+        <div><dt className="text-slate-400">Duration</dt><dd>{event.duration_minutes ?? '—'} min</dd></div>
+      </dl>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {state === 'draft' && (
+          <button disabled={isBusy} onClick={() => void onStateChange(event.code, 'active')} className="rounded-lg border border-mint/40 px-3 py-1.5 text-xs text-mint disabled:opacity-60">Activate</button>
+        )}
+        {state === 'active' && (
+          <button disabled={isBusy} onClick={() => void onStateChange(event.code, 'live')} className="rounded-lg border border-emerald-400/40 px-3 py-1.5 text-xs text-emerald-300 disabled:opacity-60">Start</button>
+        )}
+        {state === 'live' && (
+          <>
+            <button disabled={isBusy} onClick={() => void onStateChange(event.code, 'paused')} className="rounded-lg border border-amber-400/40 px-3 py-1.5 text-xs text-amber-200 disabled:opacity-60">Pause</button>
+            <button disabled={isBusy} onClick={() => void onStateChange(event.code, 'ended')} className="rounded-lg border border-rose-400/40 px-3 py-1.5 text-xs text-rose-300 disabled:opacity-60">End</button>
+          </>
+        )}
+        {state === 'paused' && (
+          <>
+            <button disabled={isBusy} onClick={() => void onStateChange(event.code, 'live')} className="rounded-lg border border-emerald-400/40 px-3 py-1.5 text-xs text-emerald-300 disabled:opacity-60">Resume</button>
+            <button disabled={isBusy} onClick={() => void onStateChange(event.code, 'ended')} className="rounded-lg border border-rose-400/40 px-3 py-1.5 text-xs text-rose-300 disabled:opacity-60">End</button>
+          </>
+        )}
+        <button disabled={isBusy} onClick={() => void onOpenAdmin(event.code)} className="rounded-lg border border-mint/40 px-3 py-1.5 text-xs text-mint disabled:opacity-60">Open Sim Admin</button>
+        <button disabled={isBusy} onClick={() => void onOpenPlayer(event.code)} className="rounded-lg border border-white/20 px-3 py-1.5 text-xs text-slate-200 disabled:opacity-60">Open Player Link</button>
+      </div>
+    </article>
+  );
+}
+
 export default function AdminPage() {
   const { user, accessToken, isAdmin, adminLoading } = useSupabaseAuth();
-  const [events, setEvents] = useState<Awaited<ReturnType<typeof fetchAdminEvents>>['events']>([]);
+  const [events, setEvents] = useState<AdminEvent[]>([]);
   const [scenarios, setScenarios] = useState<ScenarioOption[]>(fallbackScenarios);
   const [loading, setLoading] = useState(true);
   const [formLoading, setFormLoading] = useState(false);
+  const [actionBusyCode, setActionBusyCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [showEnded, setShowEnded] = useState(false);
+  const [formErrors, setFormErrors] = useState<{ code?: string; name?: string }>({});
   const [form, setForm] = useState({
     code: '',
     name: '',
-    simType: 'portfolio_sim',
+    simType: 'portfolio',
     scenarioId: fallbackScenarios[0].id,
     durationMinutes: 45,
-    state: 'draft' as 'draft' | 'active',
+    state: 'active' as 'draft' | 'active',
   });
 
   const canLoad = !!accessToken && !!user && isAdmin;
@@ -42,6 +129,7 @@ export default function AdminPage() {
 
     try {
       setLoading(true);
+      setError(null);
       const response = await fetchAdminEvents(accessToken);
       setEvents(response.events);
     } catch (loadError) {
@@ -90,15 +178,13 @@ export default function AdminPage() {
     void loadScenarios();
   }, []);
 
-  const stateBadgeClass = useMemo(
-    () => ({
-      draft: 'bg-slate-700 text-slate-100',
-      active: 'bg-mint/20 text-mint',
-      live: 'bg-emerald-500/20 text-emerald-300',
-      ended: 'bg-amber-500/20 text-amber-200',
-    }),
-    [],
-  );
+  const grouped = useMemo(() => {
+    const drafts = events.filter((row) => normalizeState(row.state) === 'draft');
+    const active = events.filter((row) => normalizeState(row.state) === 'active');
+    const running = events.filter((row) => ['live', 'paused'].includes(normalizeState(row.state)));
+    const ended = events.filter((row) => normalizeState(row.state) === 'ended');
+    return { drafts, active, running, ended };
+  }, [events]);
 
   if (!user) {
     return <Navigate to="/login" replace />;
@@ -108,9 +194,29 @@ export default function AdminPage() {
     return <Navigate to="/" replace />;
   }
 
+  const validateForm = () => {
+    const nextErrors: { code?: string; name?: string } = {};
+    const normalizedCode = form.code.trim().toUpperCase();
+
+    if (!normalizedCode) {
+      nextErrors.code = 'Code is required.';
+    } else if (!/^[A-Z0-9_-]+$/.test(normalizedCode)) {
+      nextErrors.code = 'Use uppercase letters, numbers, underscore, or hyphen.';
+    } else if (events.some((row) => row.code.toUpperCase() === normalizedCode)) {
+      nextErrors.code = 'Code must be unique.';
+    }
+
+    if (!form.name.trim()) {
+      nextErrors.name = 'Name is required.';
+    }
+
+    setFormErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
   const handleCreateEvent = async (event: FormEvent) => {
     event.preventDefault();
-    if (!accessToken) {
+    if (!accessToken || !validateForm()) {
       return;
     }
 
@@ -140,17 +246,54 @@ export default function AdminPage() {
     }
   };
 
+  const handleStateChange = async (eventCode: string, state: 'draft' | 'active' | 'live' | 'paused' | 'ended') => {
+    if (!accessToken) {
+      return;
+    }
+
+    try {
+      setActionBusyCode(eventCode);
+      setError(null);
+      await updateAdminEventState(eventCode, state, accessToken);
+      await loadEvents();
+    } catch (changeError) {
+      setError(changeError instanceof Error ? changeError.message : 'Failed to update event state.');
+    } finally {
+      setActionBusyCode(null);
+    }
+  };
+
   const handleOpenSimAdmin = async (eventCode: string) => {
     if (!accessToken) {
       return;
     }
 
     try {
+      setActionBusyCode(eventCode);
       setError(null);
       const response = await fetchSimAdminLink(eventCode, accessToken);
       window.open(response.adminUrl, '_blank', 'noopener,noreferrer');
     } catch (linkError) {
       setError(linkError instanceof Error ? linkError.message : 'Could not generate sim admin link.');
+    } finally {
+      setActionBusyCode(null);
+    }
+  };
+
+  const handleOpenPlayerLink = async (eventCode: string) => {
+    if (!accessToken || !user) {
+      return;
+    }
+
+    try {
+      setActionBusyCode(eventCode);
+      setError(null);
+      const response = await createRunByCode(eventCode, user.id, accessToken);
+      window.open(response.simUrl, '_blank', 'noopener,noreferrer');
+    } catch (runError) {
+      setError(runError instanceof Error ? runError.message : 'Could not create player run link.');
+    } finally {
+      setActionBusyCode(null);
     }
   };
 
@@ -167,20 +310,33 @@ export default function AdminPage() {
         <article className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
           <h2 className="text-lg font-semibold">Create new event</h2>
           <form className="mt-4 space-y-3" onSubmit={handleCreateEvent}>
-            <input
-              value={form.code}
-              onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))}
-              className="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-2.5 uppercase"
-              placeholder="Event code"
-              required
-            />
-            <input
-              value={form.name}
-              onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-              className="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-2.5"
-              placeholder="Event name"
-              required
-            />
+            <div>
+              <input
+                value={form.code}
+                onChange={(event) => {
+                  const nextCode = event.target.value.toUpperCase();
+                  setForm((current) => ({ ...current, code: nextCode }));
+                  setFormErrors((current) => ({ ...current, code: undefined }));
+                }}
+                className="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-2.5 uppercase"
+                placeholder="Event code"
+                required
+              />
+              {formErrors.code && <p className="mt-1 text-xs text-rose-300">{formErrors.code}</p>}
+            </div>
+            <div>
+              <input
+                value={form.name}
+                onChange={(event) => {
+                  setForm((current) => ({ ...current, name: event.target.value }));
+                  setFormErrors((current) => ({ ...current, name: undefined }));
+                }}
+                className="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-2.5"
+                placeholder="Event name"
+                required
+              />
+              {formErrors.name && <p className="mt-1 text-xs text-rose-300">{formErrors.name}</p>}
+            </div>
             <label className="block text-sm text-slate-300">
               Sim type
               <select
@@ -188,7 +344,7 @@ export default function AdminPage() {
                 onChange={(event) => setForm((current) => ({ ...current, simType: event.target.value }))}
                 className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5"
               >
-                <option value="portfolio_sim">Portfolio Sim</option>
+                <option value="portfolio">Portfolio</option>
               </select>
             </label>
             <label className="block text-sm text-slate-300">
@@ -238,49 +394,50 @@ export default function AdminPage() {
           {loading ? (
             <p className="mt-3 text-sm text-slate-300">Loading events…</p>
           ) : (
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[760px] text-left text-sm">
-                <thead className="text-slate-400">
-                  <tr className="border-b border-white/10">
-                    <th className="pb-3 font-medium">Code</th>
-                    <th className="pb-3 font-medium">Name</th>
-                    <th className="pb-3 font-medium">Sim Type</th>
-                    <th className="pb-3 font-medium">Created</th>
-                    <th className="pb-3 font-medium">State</th>
-                    <th className="pb-3 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {events.map((event) => (
-                    <tr key={event.id} className="border-b border-white/5">
-                      <td className="py-3 font-medium text-slate-100">{event.code}</td>
-                      <td className="py-3 text-slate-200">{event.name}</td>
-                      <td className="py-3 text-slate-300">{event.sim_type ?? 'portfolio_sim'}</td>
-                      <td className="py-3 text-slate-300">{new Date(event.created_at).toLocaleString()}</td>
-                      <td className="py-3">
-                        <span className={`rounded-full px-2 py-1 text-xs ${stateBadgeClass[event.state as keyof typeof stateBadgeClass] ?? 'bg-slate-700 text-slate-100'}`}>
-                          {event.state ?? 'draft'}
-                        </span>
-                      </td>
-                      <td className="py-3">
-                        <div className="flex flex-wrap gap-2">
-                          <Link to={`/multiplayer?code=${encodeURIComponent(event.code)}`} className="rounded-lg border border-white/20 px-3 py-1.5 text-xs text-slate-200 hover:border-mint/40 hover:text-mint">
-                            Open Player Join Page
-                          </Link>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenSimAdmin(event.code)}
-                            className="rounded-lg border border-mint/40 px-3 py-1.5 text-xs text-mint hover:border-mint"
-                          >
-                            Open Sim Admin
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+            <div className="mt-4 space-y-6">
+              <section>
+                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">Draft events</h3>
+                <div className="mt-3 space-y-3">
+                  {grouped.drafts.map((event) => (
+                    <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onOpenPlayer={handleOpenPlayerLink} busy={actionBusyCode} />
                   ))}
-                </tbody>
-              </table>
-              {!events.length && <p className="mt-4 text-sm text-slate-400">No events available yet.</p>}
+                  {!grouped.drafts.length && <p className="text-sm text-slate-400">No draft events.</p>}
+                </div>
+              </section>
+
+              <section>
+                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">Active events</h3>
+                <div className="mt-3 space-y-3">
+                  {grouped.active.map((event) => (
+                    <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onOpenPlayer={handleOpenPlayerLink} busy={actionBusyCode} />
+                  ))}
+                  {!grouped.active.length && <p className="text-sm text-slate-400">No active events.</p>}
+                </div>
+              </section>
+
+              <section>
+                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">Live / running events</h3>
+                <div className="mt-3 space-y-3">
+                  {grouped.running.map((event) => (
+                    <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onOpenPlayer={handleOpenPlayerLink} busy={actionBusyCode} />
+                  ))}
+                  {!grouped.running.length && <p className="text-sm text-slate-400">No running events.</p>}
+                </div>
+              </section>
+
+              <section>
+                <button type="button" className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300" onClick={() => setShowEnded((current) => !current)}>
+                  Ended events {showEnded ? '▲' : '▼'}
+                </button>
+                {showEnded && (
+                  <div className="mt-3 space-y-3">
+                    {grouped.ended.map((event) => (
+                      <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onOpenPlayer={handleOpenPlayerLink} busy={actionBusyCode} />
+                    ))}
+                    {!grouped.ended.length && <p className="text-sm text-slate-400">No ended events.</p>}
+                  </div>
+                )}
+              </section>
             </div>
           )}
         </article>

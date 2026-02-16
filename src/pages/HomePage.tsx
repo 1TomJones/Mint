@@ -3,6 +3,7 @@ import { PrimaryButton, SecondaryButton } from '../components/Buttons';
 import { ProductCard } from '../components/Cards';
 import { RevealItem, RevealSection } from '../components/Motion';
 import { faqItems, productTiles, socialMetrics } from '../data/mockData';
+import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 
 const pillars = [
   { title: 'Simulations', text: 'Practice execution with risk-first market scenarios.', href: '/products/simulations' },
@@ -11,6 +12,8 @@ const pillars = [
 ];
 
 export default function HomePage() {
+  const { user, loading, isAdmin } = useSupabaseAuth();
+
   return (
     <>
       <RevealSection className="container-wide grid gap-10 py-16 md:grid-cols-2 md:py-24">
@@ -19,8 +22,16 @@ export default function HomePage() {
           <h1 className="text-4xl font-semibold leading-[1.05] tracking-tight md:text-6xl">Sharper strategy, refined through simulation.</h1>
           <p className="max-w-xl text-lg text-slate-300">Train frameworks. Build conviction. Execute with discipline.</p>
           <div className="flex flex-wrap gap-3">
-            <PrimaryButton href="https://example.com">Try a Sim</PrimaryButton>
-            <SecondaryButton href="/signup">Create account</SecondaryButton>
+            {loading ? null : user ? (
+              <>
+                <PrimaryButton href={isAdmin ? '/admin' : '/multiplayer'}>{isAdmin ? 'Dashboard' : 'Account'}</PrimaryButton>
+              </>
+            ) : (
+              <>
+                <PrimaryButton href="/login">Sign in</PrimaryButton>
+                <SecondaryButton href="/signup">Create account</SecondaryButton>
+              </>
+            )}
           </div>
         </RevealItem>
         <RevealItem>

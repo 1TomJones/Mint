@@ -13,7 +13,7 @@ const navItems = [
 ];
 
 export default function Navbar() {
-  const { user, signOut, isAdmin, adminLoading } = useSupabaseAuth();
+  const { user, signOut, isAdmin, adminLoading, loading } = useSupabaseAuth();
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/60 backdrop-blur-2xl">
@@ -39,17 +39,24 @@ export default function Navbar() {
           )}
         </div>
         <div className="flex items-center gap-3">
-          {user ? (
+          {loading ? null : user ? (
             <>
-              <span className="hidden text-xs text-slate-400 lg:inline">{user.email}</span>
+              <Link to={isAdmin ? '/admin' : '/multiplayer'} className="rounded-xl2 border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-mint/40 hover:text-mint">
+                {isAdmin ? 'Dashboard' : 'Account'}
+              </Link>
               <button onClick={signOut} className="rounded-xl2 border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-mint/40 hover:text-mint">
                 Sign out
               </button>
             </>
           ) : (
-            <Link to="/login" className="rounded-xl2 border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-mint/40 hover:text-mint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mint/70 focus-visible:ring-offset-2 focus-visible:ring-offset-ink">
-              Sign in
-            </Link>
+            <>
+              <Link to="/login" className="rounded-xl2 border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-mint/40 hover:text-mint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mint/70 focus-visible:ring-offset-2 focus-visible:ring-offset-ink">
+                Sign in
+              </Link>
+              <Link to="/signup" className="rounded-xl2 bg-mint px-4 py-2 text-sm font-semibold text-slate-900 transition hover:shadow-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mint/70 focus-visible:ring-offset-2 focus-visible:ring-offset-ink">
+                Create account
+              </Link>
+            </>
           )}
         </div>
       </nav>
