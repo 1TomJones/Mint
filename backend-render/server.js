@@ -102,6 +102,17 @@ function isMissingColumnError(error) {
 }
 
 
+function withDefaultEventColumns(events, defaults = {}) {
+  return (events ?? []).map((event) => ({
+    ...event,
+    sim_type: defaults.sim_type ?? 'portfolio_sim',
+    scenario_id: defaults.scenario_id ?? null,
+    duration_minutes: defaults.duration_minutes ?? null,
+    state: defaults.state ?? 'draft',
+  }));
+}
+
+
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
@@ -133,13 +144,7 @@ app.get('/api/admin/events', async (req, res) => {
         .from('events')
         .select('id,code,name,sim_url,created_at,starts_at,ends_at,started_at,ended_at')
         .order('created_at', { ascending: false });
-      events = (fallback.data ?? []).map((event) => ({
-        ...event,
-        sim_type: 'portfolio_sim',
-        scenario_id: null,
-        duration_minutes: null,
-        state: 'draft',
-      }));
+      events = withDefaultEventColumns(fallback.data, { state: 'draft' });
       error = fallback.error;
     }
 
@@ -160,8 +165,8 @@ app.post('/api/admin/events', async (req, res) => {
 
   try {
     const payload = {
-      code: req.body?.code?.toString().trim().toUpperCase(),
-      name: req.body?.name?.toString().trim(),
+      code: req.body?.code?.toString().trim().toUpperCase() || req.body?.event_code?.toString().trim().toUpperCase(),
+      name: req.body?.name?.toString().trim() || req.body?.event_name?.toString().trim(),
       sim_type: req.body?.simType?.toString().trim() || 'portfolio_sim',
       scenario_id: req.body?.scenarioId?.toString().trim() || null,
       duration_minutes: Number(req.body?.durationMinutes ?? 0) || null,
@@ -208,36 +213,94 @@ app.post('/api/admin/events', async (req, res) => {
 
 
 
-app.get('/api/events', async (req, res) => {
-  try {
-    let query = supabase
+
+async function listPublicEvents() {
+  let query = supabase
+    .from('events')
+    .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at,started_at,ended_at')
+    .in('state', ['active', 'live', 'paused'])
+    .order('created_at', { ascending: false });
+
+  let { data: events, error } = await query;
+
+  if (error && isMissingColumnError(error)) {
+    const fallback = await supabase
       .from('events')
-      .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at,started_at,ended_at')
-      .in('state', ['active', 'live', 'paused'])
+      .select('id,code,name,sim_url,created_at,starts_at,ends_at,started_at,ended_at')
       .order('created_at', { ascending: false });
+    events = withDefaultEventColumns(fallback.data, { sim_type: 'portfolio', state: 'active' });
+    error = fallback.error;
+  }
 
-    let { data: events, error } = await query;
+  if (error) {
+    throw error;
+  }
 
-    if (error && isMissingColumnError(error)) {
-      const fallback = await supabase
-        .from('events')
-        .select('id,code,name,sim_url,created_at,starts_at,ends_at,started_at,ended_at')
-        .order('created_at', { ascending: false });
-      events = (fallback.data ?? []).map((event) => ({
-        ...event,
-        sim_type: 'portfolio',
-        scenario_id: null,
-        duration_minutes: null,
-        state: 'active',
-      }));
-      error = fallback.error;
+  return events ?? [];
+}
+
+async function createEventFromPayload(body) {
+  const payload = {
+    code: body?.code?.toString().trim().toUpperCase() || body?.event_code?.toString().trim().toUpperCase(),
+    name: body?.name?.toString().trim() || body?.event_name?.toString().trim(),
+    sim_type: body?.sim_type?.toString().trim() || body?.simType?.toString().trim() || 'portfolio',
+    scenario_id: body?.scenario_id?.toString().trim() || body?.scenarioId?.toString().trim() || null,
+    duration_minutes: Number(body?.duration_minutes ?? body?.durationMinutes ?? 0) || null,
+    state: body?.state?.toString().trim() || 'active',
+    sim_url: body?.sim_url?.toString().trim() || body?.simUrl?.toString().trim() || null,
+  };
+
+  if (!payload.code || !payload.name) {
+    const error = new Error('code and name are required');
+    error.status = 400;
+    throw error;
+  }
+
+  let insertResult = await supabase
+    .from('events')
+    .insert(payload)
+    .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at,started_at,ended_at')
+    .single();
+
+  if (insertResult.error && isMissingColumnError(insertResult.error)) {
+    insertResult = await supabase
+      .from('events')
+      .insert({ code: payload.code, name: payload.name, sim_url: payload.sim_url })
+      .select('id,code,name,sim_url,created_at,starts_at,ends_at')
+      .single();
+    if (!insertResult.error && insertResult.data) {
+      insertResult.data = {
+        ...insertResult.data,
+        sim_type: payload.sim_type,
+        scenario_id: payload.scenario_id,
+        duration_minutes: payload.duration_minutes,
+        state: payload.state,
+        started_at: null,
+        ended_at: null,
+      };
     }
+  }
 
-    if (error) {
-      throw error;
-    }
+  if (insertResult.error) {
+    throw insertResult.error;
+  }
 
-    return res.json({ events: events ?? [] });
+  return insertResult.data;
+}
+
+app.get('/api/events', async (_req, res) => {
+  try {
+    const events = await listPublicEvents();
+    return res.json({ events });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to fetch public events' });
+  }
+});
+
+app.get('/api/events/public', async (_req, res) => {
+  try {
+    const events = await listPublicEvents();
+    return res.json({ events });
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to fetch public events' });
   }
@@ -249,51 +312,28 @@ app.post('/api/events', async (req, res) => {
   }
 
   try {
-    const payload = {
-      code: req.body?.code?.toString().trim().toUpperCase(),
-      name: req.body?.name?.toString().trim(),
-      sim_type: req.body?.sim_type?.toString().trim() || req.body?.simType?.toString().trim() || 'portfolio',
-      scenario_id: req.body?.scenario_id?.toString().trim() || req.body?.scenarioId?.toString().trim() || null,
-      duration_minutes: Number(req.body?.duration_minutes ?? req.body?.durationMinutes ?? 0) || null,
-      state: req.body?.state?.toString().trim() || 'active',
-      sim_url: req.body?.sim_url?.toString().trim() || req.body?.simUrl?.toString().trim() || null,
-    };
-
-    if (!payload.code || !payload.name) {
-      return res.status(400).json({ error: 'code and name are required' });
-    }
-
-    let insertResult = await supabase
-      .from('events')
-      .insert(payload)
-      .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at,started_at,ended_at')
-      .single();
-
-    if (insertResult.error && isMissingColumnError(insertResult.error)) {
-      insertResult = await supabase
-        .from('events')
-        .insert({ code: payload.code, name: payload.name, sim_url: payload.sim_url })
-        .select('id,code,name,sim_url,created_at,starts_at,ends_at')
-        .single();
-      if (!insertResult.error && insertResult.data) {
-        insertResult.data = {
-          ...insertResult.data,
-          sim_type: payload.sim_type,
-          scenario_id: payload.scenario_id,
-          duration_minutes: payload.duration_minutes,
-          state: payload.state,
-          started_at: null,
-          ended_at: null,
-        };
-      }
-    }
-
-    if (insertResult.error) {
-      throw insertResult.error;
-    }
-
-    return res.status(201).json({ event: insertResult.data });
+    const event = await createEventFromPayload(req.body);
+    return res.status(201).json({ event });
   } catch (error) {
+    if (error instanceof Error && 'status' in error && error.status === 400) {
+      return res.status(400).json({ error: error.message });
+    }
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to create event' });
+  }
+});
+
+app.post('/api/events/create', async (req, res) => {
+  if (!(await requireAdmin(req, res))) {
+    return;
+  }
+
+  try {
+    const event = await createEventFromPayload(req.body);
+    return res.status(201).json({ event });
+  } catch (error) {
+    if (error instanceof Error && 'status' in error && error.status === 400) {
+      return res.status(400).json({ error: error.message });
+    }
     return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to create event' });
   }
 });
@@ -464,6 +504,7 @@ app.post('/api/runs/create', async (req, res) => {
 
     const simUrl = new URL(event.sim_url);
     simUrl.searchParams.set('run_id', run.id);
+    simUrl.searchParams.set('event_id', event.id);
     simUrl.searchParams.set('event_code', event.code);
     if (event.scenario_id) {
       simUrl.searchParams.set('scenario_id', event.scenario_id);

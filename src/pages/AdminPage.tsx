@@ -3,50 +3,14 @@ import { Navigate } from 'react-router-dom';
 import {
   createAdminEvent,
   fetchAdminEvents,
-  fetchSimAdminLink,
+  fetchPortfolioScenarioMetadata,
   updateAdminEventState,
   type AdminEvent,
+  type ScenarioMetadata,
 } from '../lib/backendApi';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 
-interface ScenarioOption {
-  id: string;
-  name: string;
-  description: string;
-  durationMinutes: number | null;
-}
-
 const simBaseUrl = (import.meta.env.VITE_PORTFOLIO_SIM_URL as string | undefined)?.replace(/\/$/, '') ?? '';
-const metadataUrlEnv = (import.meta.env.VITE_PORTFOLIO_SIM_METADATA_URL as string | undefined)?.trim() ?? '';
-const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.trim() ?? '';
-
-function resolveScenarioMetadataUrl() {
-  if (metadataUrlEnv) {
-    return metadataUrlEnv;
-  }
-
-  if (!simBaseUrl) {
-    return '';
-  }
-
-  return `${simBaseUrl}/api/metadata`;
-}
-
-async function parseErrorResponse(response: Response) {
-  const rawBody = await response.text();
-  const hasBody = !!rawBody.trim();
-
-  if (!hasBody) {
-    return `${response.status} ${response.statusText}`.trim();
-  }
-
-  try {
-    const payload = JSON.parse(rawBody) as { error?: string; message?: string };
-    return `${response.status} ${payload.error ?? payload.message ?? response.statusText}`.trim();
-  } catch {
-    return `${response.status} ${rawBody.slice(0, 180)}`.trim();
-  }
-}
 
 function normalizeState(state: string | null | undefined) {
   const normalized = (state ?? 'draft').toLowerCase();
@@ -70,13 +34,13 @@ function nextCodeSuggestion(events: AdminEvent[]) {
 function EventCard({
   event,
   onStateChange,
-  onOpenAdmin,
+  onJoinAsAdmin,
   onCopyCode,
   busy,
 }: {
   event: AdminEvent;
   onStateChange: (eventCode: string, state: 'draft' | 'active' | 'live' | 'paused' | 'ended') => Promise<void>;
-  onOpenAdmin: (eventCode: string) => Promise<void>;
+  onJoinAsAdmin: (event: AdminEvent) => void;
   onCopyCode: (eventCode: string) => Promise<void>;
   busy: string | null;
 }) {
@@ -129,7 +93,7 @@ function EventCard({
             <button disabled={isBusy} onClick={() => void onStateChange(event.code, 'ended')} className="rounded-lg border border-rose-400/40 px-3 py-1.5 text-xs text-rose-300 disabled:opacity-60">End</button>
           </>
         )}
-        <button disabled={isBusy} onClick={() => void onOpenAdmin(event.code)} className="rounded-lg border border-mint/40 px-3 py-1.5 text-xs text-mint disabled:opacity-60">Open Sim Admin</button>
+        <button disabled={isBusy} onClick={() => onJoinAsAdmin(event)} className="rounded-lg border border-mint/40 px-3 py-1.5 text-xs text-mint disabled:opacity-60">Join as admin</button>
         <button disabled={isBusy} onClick={() => void onCopyCode(event.code)} className="rounded-lg border border-white/20 px-3 py-1.5 text-xs text-slate-200 disabled:opacity-60">Copy Player Code</button>
       </div>
     </article>
@@ -139,7 +103,7 @@ function EventCard({
 export default function AdminPage() {
   const { user, accessToken, isAdmin, adminLoading } = useSupabaseAuth();
   const [events, setEvents] = useState<AdminEvent[]>([]);
-  const [scenarios, setScenarios] = useState<ScenarioOption[]>([]);
+  const [scenarios, setScenarios] = useState<ScenarioMetadata[]>([]);
   const [loading, setLoading] = useState(true);
   const [formLoading, setFormLoading] = useState(false);
   const [actionBusyCode, setActionBusyCode] = useState<string | null>(null);
@@ -148,7 +112,6 @@ export default function AdminPage() {
   const [showEnded, setShowEnded] = useState(false);
   const [formErrors, setFormErrors] = useState<{ code?: string; name?: string; scenarioId?: string }>({});
   const [scenarioLoadError, setScenarioLoadError] = useState<string | null>(null);
-  const [scenarioMetadataUrl, setScenarioMetadataUrl] = useState<string>(resolveScenarioMetadataUrl());
   const [form, setForm] = useState({
     code: 'KENTINVEST01',
     name: '',
@@ -157,7 +120,6 @@ export default function AdminPage() {
   });
 
   const canLoad = !!accessToken && !!user && isAdmin;
-  const showDebug = import.meta.env.DEV || new URLSearchParams(window.location.search).get('debug') === '1';
 
   const loadEvents = async () => {
     if (!accessToken) return [];
@@ -169,6 +131,7 @@ export default function AdminPage() {
       setForm((current) => (current.code.trim() ? current : { ...current, code: nextCodeSuggestion(response.events) }));
       return response.events;
     } catch (loadError) {
+      console.error('[AdminPage] Failed to load admin events', loadError);
       setError(loadError instanceof Error ? loadError.message : 'Failed to load admin events.');
       return [];
     } finally {
@@ -186,66 +149,24 @@ export default function AdminPage() {
 
   useEffect(() => {
     const loadScenarios = async () => {
-      if (!simBaseUrl) {
-        console.error('[AdminPage] Missing required env var for scenario metadata.', {
-          requiredEnvVars: ['VITE_BACKEND_URL', 'VITE_PORTFOLIO_SIM_URL'],
-          VITE_BACKEND_URL: backendUrl || '(missing)',
-          VITE_PORTFOLIO_SIM_URL: simBaseUrl || '(missing)',
-        });
-        setScenarioMetadataUrl('');
-        setScenarioLoadError('Portfolio sim URL not configured.');
-        return;
-      }
-
-      const endpoint = resolveScenarioMetadataUrl();
-      setScenarioMetadataUrl(endpoint);
-
       try {
-        const response = await fetch(endpoint);
-        if (!response.ok) {
-          const details = await parseErrorResponse(response);
-          throw new Error(`Unable to load scenarios (${details}).`);
-        }
-
-        const rawBody = await response.text();
-        let payload: {
-          scenarios?: Array<{ id?: string; scenario_id?: string; name?: string; title?: string; description?: string; duration_minutes?: number; duration?: number }>;
-        } = {};
-
-        try {
-          payload = JSON.parse(rawBody) as typeof payload;
-        } catch {
-          throw new Error(`Unable to load scenarios (${response.status} metadata response was not valid JSON).`);
-        }
-
-        const rows = (payload.scenarios ?? [])
-          .map((scenario) => {
-            const id = scenario.id?.trim() || scenario.scenario_id?.trim() || '';
-            const durationMinutes = Number(scenario.duration_minutes ?? scenario.duration ?? 0) || null;
-            return {
-              id,
-              name: scenario.name?.trim() || scenario.title?.trim() || id,
-              description: scenario.description?.trim() || 'No description provided.',
-              durationMinutes,
-            };
-          })
-          .filter((scenario) => scenario.id);
-
-        setScenarioLoadError(null);
+        const rows = await fetchPortfolioScenarioMetadata();
         setScenarios(rows);
+        setScenarioLoadError(null);
         if (rows.length) {
           setForm((current) => {
-            const defaultScenario = rows.find((row) => row.id === current.scenarioId) ?? rows[0];
+            const selected = rows.find((row) => row.id === current.scenarioId) ?? rows[0];
             return {
               ...current,
-              scenarioId: current.scenarioId || defaultScenario.id,
-              durationMinutes: defaultScenario.durationMinutes ?? current.durationMinutes,
+              scenarioId: current.scenarioId || selected.id,
+              durationMinutes: selected.default_duration_minutes ?? current.durationMinutes,
             };
           });
         }
       } catch (loadError) {
+        console.error('[AdminPage] metadata fetch failed', loadError);
         setScenarios([]);
-        setScenarioLoadError(loadError instanceof Error ? loadError.message : 'Unable to load scenarios.');
+        setScenarioLoadError('Cannot load scenarios');
       }
     };
 
@@ -299,10 +220,11 @@ export default function AdminPage() {
       const eventCode = form.code.trim().toUpperCase();
       await createAdminEvent(
         {
-          event_code: eventCode,
-          event_name: form.name.trim(),
+          code: eventCode,
+          name: form.name.trim(),
           scenario_id: form.scenarioId,
           duration_minutes: Number(form.durationMinutes),
+          sim_url: simBaseUrl,
         },
         accessToken,
       );
@@ -314,8 +236,8 @@ export default function AdminPage() {
         name: '',
       }));
     } catch (createError) {
-      const message = createError instanceof Error ? createError.message : 'Failed to create event.';
-      setError(`${message}\nAdmin: check Supabase schema (scenario_id, duration_minutes)`);
+      console.error('[AdminPage] create event failed', createError);
+      setError(createError instanceof Error ? createError.message : 'Failed to create event.');
     } finally {
       setFormLoading(false);
       window.setTimeout(() => setToast(null), 3200);
@@ -330,23 +252,26 @@ export default function AdminPage() {
       await updateAdminEventState(eventCode, state, accessToken);
       await loadEvents();
     } catch (changeError) {
+      console.error('[AdminPage] state update failed', changeError);
       setError(changeError instanceof Error ? changeError.message : 'Failed to update event state.');
     } finally {
       setActionBusyCode(null);
     }
   };
 
-  const handleOpenSimAdmin = async (eventCode: string) => {
-    if (!accessToken) return;
+  const handleJoinAsAdmin = (event: AdminEvent) => {
     try {
-      setActionBusyCode(eventCode);
-      setError(null);
-      const response = await fetchSimAdminLink(eventCode, accessToken);
-      window.open(response.adminUrl, '_blank', 'noopener,noreferrer');
-    } catch (linkError) {
-      setError(linkError instanceof Error ? linkError.message : 'Could not generate sim admin link.');
-    } finally {
-      setActionBusyCode(null);
+      const adminBaseUrl = event.sim_url.endsWith('/') ? `${event.sim_url}admin.html` : `${event.sim_url}/admin.html`;
+      const adminUrl = new URL(adminBaseUrl);
+      adminUrl.searchParams.set('event_id', event.id);
+      adminUrl.searchParams.set('code', event.code);
+      if (event.scenario_id) {
+        adminUrl.searchParams.set('scenario_id', event.scenario_id);
+      }
+      window.open(adminUrl.toString(), '_blank', 'noopener,noreferrer');
+    } catch (openError) {
+      console.error('[AdminPage] failed to open admin URL', openError);
+      setError('Could not open admin URL.');
     }
   };
 
@@ -411,7 +336,7 @@ export default function AdminPage() {
                   setForm((current) => ({
                     ...current,
                     scenarioId: event.target.value,
-                    durationMinutes: nextScenario?.durationMinutes ?? current.durationMinutes,
+                    durationMinutes: nextScenario?.default_duration_minutes ?? current.durationMinutes,
                   }));
                   setFormErrors((current) => ({ ...current, scenarioId: undefined }));
                 }}
@@ -421,16 +346,16 @@ export default function AdminPage() {
               >
                 {!scenarios.length && <option value="">No scenarios available</option>}
                 {scenarios.map((scenario) => (
-                  <option key={scenario.id} value={scenario.id}>{scenario.name} ({scenario.durationMinutes ?? '—'} min)</option>
+                  <option key={scenario.id} value={scenario.id}>{scenario.title} ({scenario.default_duration_minutes ?? '—'} min)</option>
                 ))}
               </select>
               {formErrors.scenarioId && <p className="mt-1 text-xs text-rose-300">{formErrors.scenarioId}</p>}
             </label>
             {selectedScenario && (
               <div className="rounded-xl border border-white/10 bg-slate-950/70 p-3 text-sm text-slate-300">
-                <p className="font-medium text-slate-100">{selectedScenario.name}</p>
+                <p className="font-medium text-slate-100">{selectedScenario.title}</p>
                 <p className="mt-1">{selectedScenario.description}</p>
-                <p className="mt-1 text-xs uppercase tracking-[0.15em] text-slate-400">Duration: {selectedScenario.durationMinutes ?? form.durationMinutes} minutes</p>
+                <p className="mt-1 text-xs uppercase tracking-[0.15em] text-slate-400">Duration: {selectedScenario.default_duration_minutes ?? form.durationMinutes} minutes</p>
               </div>
             )}
             <label className="block text-sm text-slate-300">
@@ -450,16 +375,7 @@ export default function AdminPage() {
           </form>
           {toast && <p className="mt-3 text-sm text-mint">{toast}</p>}
           {error && <p className="mt-3 rounded-lg border border-rose-400/25 bg-rose-900/20 p-3 text-sm text-rose-200">{error}</p>}
-          {scenarioLoadError && <p className="mt-3 rounded-lg border border-rose-400/25 bg-rose-900/20 p-3 text-sm text-rose-200">{scenarioLoadError}</p>}
-          {showDebug && (
-            <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/70 p-3 text-xs text-slate-300">
-              <p className="font-semibold uppercase tracking-[0.16em] text-slate-400">Debug</p>
-              <p className="mt-2"><span className="text-slate-400">Backend URL:</span> {backendUrl || '—'}</p>
-              <p><span className="text-slate-400">Portfolio Sim URL:</span> {simBaseUrl || '—'}</p>
-              <p><span className="text-slate-400">Final scenarios URL attempted:</span> {scenarioMetadataUrl || '—'}</p>
-              <p><span className="text-slate-400">Scenarios loaded:</span> {scenarios.length}</p>
-            </div>
-          )}
+          {scenarioLoadError && <p className="mt-3 text-sm text-rose-200">{scenarioLoadError}</p>}
         </article>
 
         <article className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
@@ -472,7 +388,7 @@ export default function AdminPage() {
                 <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">Draft events</h3>
                 <div className="mt-3 space-y-3">
                   {grouped.drafts.map((event) => (
-                    <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onCopyCode={handleCopyCode} busy={actionBusyCode} />
+                    <EventCard key={event.id} event={event} onStateChange={handleStateChange} onJoinAsAdmin={handleJoinAsAdmin} onCopyCode={handleCopyCode} busy={actionBusyCode} />
                   ))}
                   {!grouped.drafts.length && <p className="text-sm text-slate-400">No draft events.</p>}
                 </div>
@@ -482,7 +398,7 @@ export default function AdminPage() {
                 <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">Active events</h3>
                 <div className="mt-3 space-y-3">
                   {grouped.active.map((event) => (
-                    <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onCopyCode={handleCopyCode} busy={actionBusyCode} />
+                    <EventCard key={event.id} event={event} onStateChange={handleStateChange} onJoinAsAdmin={handleJoinAsAdmin} onCopyCode={handleCopyCode} busy={actionBusyCode} />
                   ))}
                   {!grouped.active.length && <p className="text-sm text-slate-400">No active events.</p>}
                 </div>
@@ -492,7 +408,7 @@ export default function AdminPage() {
                 <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">Live / running events</h3>
                 <div className="mt-3 space-y-3">
                   {grouped.running.map((event) => (
-                    <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onCopyCode={handleCopyCode} busy={actionBusyCode} />
+                    <EventCard key={event.id} event={event} onStateChange={handleStateChange} onJoinAsAdmin={handleJoinAsAdmin} onCopyCode={handleCopyCode} busy={actionBusyCode} />
                   ))}
                   {!grouped.running.length && <p className="text-sm text-slate-400">No running events.</p>}
                 </div>
@@ -505,7 +421,7 @@ export default function AdminPage() {
                 {showEnded && (
                   <div className="mt-3 space-y-3">
                     {grouped.ended.map((event) => (
-                      <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onCopyCode={handleCopyCode} busy={actionBusyCode} />
+                      <EventCard key={event.id} event={event} onStateChange={handleStateChange} onJoinAsAdmin={handleJoinAsAdmin} onCopyCode={handleCopyCode} busy={actionBusyCode} />
                     ))}
                     {!grouped.ended.length && <p className="text-sm text-slate-400">No ended events.</p>}
                   </div>
