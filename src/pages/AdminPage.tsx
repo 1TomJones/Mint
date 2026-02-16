@@ -9,6 +9,7 @@ import {
   type ScenarioMetadata,
 } from '../lib/backendApi';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
+import { getFreshAccessToken } from '../lib/supabase';
 import { appEnv } from '../lib/env';
 
 function normalizeState(state: string | null | undefined) {
@@ -213,12 +214,14 @@ export default function AdminPage() {
 
   const handleCreateEvent = async (event: FormEvent) => {
     event.preventDefault();
-    if (!accessToken || !user || !validateForm()) return;
+    if (!user || !validateForm()) return;
 
     try {
       setFormLoading(true);
       setError(null);
       const eventCode = form.code.trim().toUpperCase();
+      const freshAccessToken = await getFreshAccessToken();
+
       await createAdminEvent(
         {
           event_code: eventCode,
@@ -227,7 +230,7 @@ export default function AdminPage() {
           duration_minutes: Number(form.durationMinutes),
           sim_url: form.simUrl.trim(),
         },
-        accessToken,
+        freshAccessToken,
         user.id,
       );
       setToast(`Event ${eventCode} created.`);
