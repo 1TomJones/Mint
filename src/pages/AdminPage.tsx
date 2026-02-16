@@ -154,7 +154,6 @@ export default function AdminPage() {
     name: '',
     scenarioId: '',
     durationMinutes: 45,
-    state: 'active' as 'draft' | 'active',
   });
 
   const canLoad = !!accessToken && !!user && isAdmin;
@@ -300,13 +299,10 @@ export default function AdminPage() {
       const eventCode = form.code.trim().toUpperCase();
       await createAdminEvent(
         {
-          code: eventCode,
-          name: form.name.trim(),
-          sim_type: 'portfolio',
-          sim_url: simBaseUrl,
+          event_code: eventCode,
+          event_name: form.name.trim(),
           scenario_id: form.scenarioId,
           duration_minutes: Number(form.durationMinutes),
-          state: form.state,
         },
         accessToken,
       );
@@ -318,7 +314,8 @@ export default function AdminPage() {
         name: '',
       }));
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Failed to create event.');
+      const message = createError instanceof Error ? createError.message : 'Failed to create event.';
+      setError(`${message}\nAdmin: check Supabase schema (scenario_id, duration_minutes)`);
     } finally {
       setFormLoading(false);
       window.setTimeout(() => setToast(null), 3200);

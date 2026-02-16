@@ -7,6 +7,7 @@ interface ApiFetchOptions extends Omit<RequestInit, 'body' | 'method'> {
   method?: ApiMethod;
   body?: unknown;
   requireAuth?: boolean;
+  includeUserIdHeader?: boolean;
 }
 
 interface StoredSession {
@@ -37,18 +38,20 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}) {
 
   const userId = readSessionUserId();
   const requiresAuth = options.requireAuth ?? true;
+  const includeUserIdHeader = options.includeUserIdHeader ?? true;
+  const hasAuthorizationHeader = new Headers(options.headers).has('Authorization');
 
-  if (requiresAuth && !userId) {
+  if (requiresAuth && !userId && !hasAuthorizationHeader) {
     throw new Error('Please sign in');
   }
 
   const headers = new Headers(options.headers);
   headers.set('Content-Type', 'application/json');
-  if (userId) {
+  if (includeUserIdHeader && userId) {
     headers.set('x-user-id', userId);
   }
 
-  const { method, body, requireAuth: _ignoredRequireAuth, ...requestInit } = options;
+  const { method, body, requireAuth: _ignoredRequireAuth, includeUserIdHeader: _ignoredIncludeUserIdHeader, ...requestInit } = options;
 
   return fetch(`${backendUrl}${path}`, {
     ...requestInit,
