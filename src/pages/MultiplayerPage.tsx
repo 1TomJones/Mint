@@ -31,6 +31,7 @@ export default function MultiplayerPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scenarioError, setScenarioError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const load = async () => {
@@ -43,7 +44,7 @@ export default function MultiplayerPage() {
       } catch (loadError) {
         console.error('[MultiplayerPage] Failed to load events/metadata', loadError);
         setError(loadError instanceof Error ? loadError.message : 'Failed to load multiplayer data.');
-        setScenarioError('Cannot load scenarios');
+        setScenarioError(loadError instanceof Error ? loadError.message : 'Cannot load scenarios');
       } finally {
         setEventsLoading(false);
       }
@@ -66,7 +67,7 @@ export default function MultiplayerPage() {
     };
 
     void load();
-  }, [accessToken, user]);
+  }, [accessToken, user, reloadKey]);
 
   const activeEvents = useMemo(
     () => events.filter((event) => ['active', 'running', 'live', 'paused'].includes((event.state ?? '').toLowerCase())),
@@ -102,12 +103,7 @@ export default function MultiplayerPage() {
       setJoining(true);
       setError(null);
       const createdRun = await createRunByCode(eventCode.trim().toUpperCase(), user.id, accessToken);
-      window.open(createdRun.launchUrl, '_blank', 'noopener,noreferrer');
-      setToast('Run created — sim opened in new tab');
-      setEventCode('');
-
-      const updatedRuns = await fetchUserRuns(user.id, accessToken);
-      setRuns(updatedRuns);
+      window.location.assign(createdRun.launchUrl);
     } catch (joinError) {
       console.error('[MultiplayerPage] Join event failed', joinError);
       setError(joinError instanceof Error ? joinError.message : 'Unable to join event.');
@@ -122,6 +118,26 @@ export default function MultiplayerPage() {
     setError(null);
     setToast(`Code ${code} loaded into Join input.`);
     setTimeout(() => setToast(null), 2500);
+  };
+
+  const handleJoinByCode = async (code: string) => {
+    setEventCode(code);
+    if (!user || !accessToken) {
+      setError('Please sign in first');
+      return;
+    }
+
+    try {
+      setJoining(true);
+      setError(null);
+      const createdRun = await createRunByCode(code.trim().toUpperCase(), user.id, accessToken);
+      window.location.assign(createdRun.launchUrl);
+    } catch (joinError) {
+      console.error('[MultiplayerPage] Join event failed', joinError);
+      setError(joinError instanceof Error ? joinError.message : 'Unable to join event.');
+    } finally {
+      setJoining(false);
+    }
   };
 
   return (
@@ -171,7 +187,18 @@ export default function MultiplayerPage() {
             )}
             {toast && <p className="mt-3 text-sm text-mint">{toast}</p>}
             {error && <p className="mt-3 rounded-lg border border-rose-300/20 bg-rose-900/20 p-3 text-sm text-rose-200">{error}</p>}
-            {scenarioError && <p className="mt-3 text-sm text-rose-200">{scenarioError}</p>}
+            {scenarioError && (
+              <div className="mt-3 rounded-lg border border-rose-300/25 bg-rose-900/20 p-3">
+                <p className="text-sm text-rose-200">{scenarioError}</p>
+                <button
+                  type="button"
+                  className="mt-2 rounded-lg border border-white/20 px-3 py-1.5 text-xs text-slate-200 hover:border-mint/40 hover:text-mint"
+                  onClick={() => setReloadKey((current) => current + 1)}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
           </article>
 
           <article className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
@@ -253,7 +280,18 @@ export default function MultiplayerPage() {
                   <p className="mt-1 text-xs text-slate-300">Scenario: {scenarioTitle}</p>
                   <p className="mt-1 text-xs text-slate-300">Duration: {event.duration_minutes ?? '—'} min</p>
                   <div className="mt-3 flex items-center gap-3 text-sm">
-                    <span className="rounded-lg border border-mint/40 px-3 py-1.5 text-mint">{isSelected ? 'Selected' : 'Select event'}</span>
+                    <button
+                      type="button"
+                      disabled={joining}
+                      onClick={(linkEvent) => {
+                        linkEvent.stopPropagation();
+                        void handleJoinByCode(event.code);
+                      }}
+                      className="rounded-lg border border-mint/40 px-3 py-1.5 text-mint disabled:opacity-60"
+                    >
+                      {joining ? 'Joining…' : 'Join'}
+                    </button>
+                    <span className="rounded-lg border border-white/20 px-3 py-1.5 text-slate-300">{isSelected ? 'Selected' : 'Select event'}</span>
                     <Link
                       onClick={(linkEvent) => linkEvent.stopPropagation()}
                       className="text-slate-300 hover:text-white"
