@@ -28,6 +28,8 @@ export interface AuthUser {
 export interface Session {
   access_token: string;
   refresh_token?: string;
+  expires_at?: number;
+  expires_in?: number;
   user: AuthUser;
 }
 
@@ -91,7 +93,59 @@ async function supabaseRequest<T>(path: string, options: RequestOptions = {}) {
 interface SignInResponse {
   access_token: string;
   refresh_token?: string;
+  expires_at?: number;
+  expires_in?: number;
   user: AuthUser;
+}
+
+interface QueryResult<T> {
+  data: T | null;
+  error: Error | null;
+}
+
+class SupabaseQueryBuilder<T> implements PromiseLike<QueryResult<T[]>> {
+  private readonly params = new URLSearchParams();
+
+  constructor(private readonly table: string) {}
+
+  select(columns: string) {
+    this.params.set('select', columns);
+    return this;
+  }
+
+  eq(column: string, value: string) {
+    this.params.set(column, `eq.${value}`);
+    return this;
+  }
+
+  order(column: string, options?: { ascending?: boolean }) {
+    const direction = options?.ascending === false ? 'desc' : 'asc';
+    this.params.set('order', `${column}.${direction}`);
+    return this;
+  }
+
+  limit(count: number) {
+    this.params.set('limit', String(count));
+    return this;
+  }
+
+  async execute(): Promise<QueryResult<T[]>> {
+    try {
+      const accessToken = await getFreshAccessToken();
+      const path = `/rest/v1/${this.table}?${this.params.toString()}`;
+      const data = await supabaseRequest<T[]>(path, { accessToken });
+      return { data, error: null };
+    } catch (error) {
+      return { data: null, error: error as Error };
+    }
+  }
+
+  then<TResult1 = QueryResult<T[]>, TResult2 = never>(
+    onfulfilled?: ((value: QueryResult<T[]>) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): Promise<TResult1 | TResult2> {
+    return this.execute().then(onfulfilled ?? undefined, onrejected ?? undefined);
+  }
 }
 
 interface SignUpResponse {
@@ -149,8 +203,54 @@ export const supabase = {
       emitAuth('SIGNED_OUT', null);
       return { error: null as Error | null };
     },
+    async refreshSession() {
+      const currentSession = readStoredSession();
+      if (!currentSession?.refresh_token) {
+        return { data: { session: currentSession ?? null }, error: new Error('No refresh token available.') };
+      }
+
+      try {
+        const refreshedSession = await supabaseRequest<SignInResponse>('/auth/v1/token?grant_type=refresh_token', {
+          method: 'POST',
+          body: { refresh_token: currentSession.refresh_token },
+        });
+        persistSession(refreshedSession);
+        emitAuth('TOKEN_REFRESHED', refreshedSession);
+        return { data: { session: refreshedSession }, error: null as Error | null };
+      } catch (error) {
+        return { data: { session: currentSession }, error: error as Error };
+      }
+    },
+  },
+  from<T = Record<string, unknown>>(table: string) {
+    return new SupabaseQueryBuilder<T>(table);
   },
 };
+
+export async function getFreshAccessToken() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) {
+    throw error;
+  }
+
+  const session = data.session;
+  if (!session) {
+    throw new Error('No active Supabase session.');
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  let accessToken = session.access_token;
+  if (session.expires_at && session.expires_at < now + 60) {
+    const refreshed = await supabase.auth.refreshSession();
+    if (refreshed.error) {
+      throw refreshed.error;
+    }
+
+    accessToken = refreshed.data.session?.access_token ?? accessToken;
+  }
+
+  return accessToken;
+}
 
 export interface EventRow {
   id: string;

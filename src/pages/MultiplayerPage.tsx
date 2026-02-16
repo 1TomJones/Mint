@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
-import { RunRow, fetchUserRuns } from '../lib/supabase';
+import { RunRow, getFreshAccessToken, supabase } from '../lib/supabase';
 import {
   createRunByCode,
   fetchPortfolioScenarioMetadata,
@@ -19,7 +19,7 @@ function formatMetric(value: number | null | undefined) {
 }
 
 export default function MultiplayerPage() {
-  const { user, accessToken } = useSupabaseAuth();
+  const { user } = useSupabaseAuth();
   const [searchParams] = useSearchParams();
   const [eventCode, setEventCode] = useState('');
   const [events, setEvents] = useState<PublicEvent[]>([]);
@@ -49,15 +49,24 @@ export default function MultiplayerPage() {
         setEventsLoading(false);
       }
 
-      if (!accessToken || !user) {
+      if (!user) {
         setRunsLoading(false);
         return;
       }
 
       try {
         setRunsLoading(true);
-        const runsData = await fetchUserRuns(user.id, accessToken);
-        setRuns(runsData);
+        const { data: runsData, error: runsError } = await supabase
+          .from<RunRow>('runs')
+          .select('id,created_at,finished_at,event_id,events(name,code),run_results(score,pnl,sharpe,max_drawdown)')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (runsError) {
+          throw runsError;
+        }
+
+        setRuns(runsData ?? []);
       } catch (loadError) {
         console.error('[MultiplayerPage] Failed to load run history', loadError);
         setError(loadError instanceof Error ? loadError.message : 'Failed to load run history.');
@@ -67,7 +76,7 @@ export default function MultiplayerPage() {
     };
 
     void load();
-  }, [accessToken, user, reloadKey]);
+  }, [user, reloadKey]);
 
   const activeEvents = useMemo(
     () => events.filter((event) => ['active', 'running', 'live', 'paused'].includes((event.state ?? '').toLowerCase())),
@@ -90,7 +99,7 @@ export default function MultiplayerPage() {
 
   const handleJoin = async (event: FormEvent) => {
     event.preventDefault();
-    if (!user || !accessToken) {
+    if (!user) {
       setError('Please sign in first');
       return;
     }
@@ -102,7 +111,8 @@ export default function MultiplayerPage() {
     try {
       setJoining(true);
       setError(null);
-      const createdRun = await createRunByCode(eventCode.trim().toUpperCase(), user.id, accessToken);
+      const freshAccessToken = await getFreshAccessToken();
+      const createdRun = await createRunByCode(eventCode.trim().toUpperCase(), user.id, freshAccessToken);
       window.location.assign(createdRun.launchUrl);
     } catch (joinError) {
       console.error('[MultiplayerPage] Join event failed', joinError);
@@ -122,7 +132,7 @@ export default function MultiplayerPage() {
 
   const handleJoinByCode = async (code: string) => {
     setEventCode(code);
-    if (!user || !accessToken) {
+    if (!user) {
       setError('Please sign in first');
       return;
     }
@@ -130,7 +140,8 @@ export default function MultiplayerPage() {
     try {
       setJoining(true);
       setError(null);
-      const createdRun = await createRunByCode(code.trim().toUpperCase(), user.id, accessToken);
+      const freshAccessToken = await getFreshAccessToken();
+      const createdRun = await createRunByCode(code.trim().toUpperCase(), user.id, freshAccessToken);
       window.location.assign(createdRun.launchUrl);
     } catch (joinError) {
       console.error('[MultiplayerPage] Join event failed', joinError);
