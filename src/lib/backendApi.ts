@@ -5,6 +5,7 @@ interface BackendOptions {
   body?: unknown;
   accessToken?: string;
   requireAuth?: boolean;
+  userId?: string;
 }
 
 interface BackendErrorPayload {
@@ -27,8 +28,10 @@ async function backendRequest<T>(path: string, options: BackendOptions = {}) {
     method: options.method ?? 'GET',
     body: options.body,
     requireAuth: options.requireAuth,
+    includeUserIdHeader: !!options.userId,
     headers: {
       ...(options.accessToken ? { Authorization: `Bearer ${options.accessToken}` } : {}),
+      ...(options.userId ? { 'x-user-id': options.userId } : {}),
     },
   });
 
@@ -68,10 +71,11 @@ interface CreateRunApiResponse {
   launch_url?: string;
 }
 
-export async function createRunByCode(eventCode: string) {
+export async function createRunByCode(eventCode: string, accessToken?: string) {
   const response = await backendRequest<CreateRunApiResponse>('/api/runs/create', {
     method: 'POST',
     body: { eventCode },
+    accessToken,
   });
 
   const runId = response.runId ?? response.run_id;
@@ -182,20 +186,18 @@ export function fetchAdminEvents(accessToken: string) {
 }
 
 export interface CreateAdminEventInput {
-  code: string;
-  name: string;
-  sim_type: string;
+  event_code: string;
+  event_name: string;
   scenario_id: string;
   duration_minutes: number;
-  state?: 'draft' | 'active';
-  sim_url: string;
 }
 
-export function createAdminEvent(payload: CreateAdminEventInput, accessToken: string) {
-  return backendRequest<{ event: AdminEvent }>('/api/events', {
+export function createAdminEvent(payload: CreateAdminEventInput, accessToken: string, userId?: string) {
+  return backendRequest<{ event: AdminEvent }>('/api/events/create', {
     method: 'POST',
     body: payload,
     accessToken,
+    userId,
   });
 }
 

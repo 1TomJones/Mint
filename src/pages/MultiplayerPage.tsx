@@ -40,7 +40,9 @@ export default function MultiplayerPage() {
         const eventsData = await fetchPublicEvents();
         setEvents(eventsData.events);
       } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : 'Failed to load multiplayer data.');
+        const message = loadError instanceof Error ? loadError.message : 'Failed to load multiplayer data.';
+        setError(`${formatErrorMessage(message)}
+Admin: check Supabase schema (scenario_id, duration_minutes)`);
       } finally {
         setEventsLoading(false);
       }
@@ -93,7 +95,7 @@ export default function MultiplayerPage() {
     try {
       setJoining(true);
       setError(null);
-      const createdRun = await createRunByCode(eventCode.trim().toUpperCase());
+      const createdRun = await createRunByCode(eventCode.trim().toUpperCase(), accessToken);
       window.open(createdRun.launchUrl, '_blank', 'noopener,noreferrer');
       setToast('Run created — sim opened in new tab');
       setEventCode('');
@@ -102,7 +104,8 @@ export default function MultiplayerPage() {
       setRuns(updatedRuns);
     } catch (joinError) {
       const message = joinError instanceof Error ? joinError.message : 'Unable to join event.';
-      setError(formatErrorMessage(message));
+      setError(`${formatErrorMessage(message)}
+Admin: check Supabase schema (scenario_id, duration_minutes)`);
     } finally {
       setJoining(false);
       setTimeout(() => setToast(null), 3500);
@@ -240,6 +243,8 @@ export default function MultiplayerPage() {
                 >
                   <p className="text-sm font-medium">{event.name}</p>
                   <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-400">Code: {event.code}</p>
+                  <p className="mt-1 text-xs text-slate-300">Scenario: {event.scenario_id ?? '—'}</p>
+                  <p className="mt-1 text-xs text-slate-300">Duration: {event.duration_minutes ?? '—'} min</p>
                   <div className="mt-3 flex items-center gap-3 text-sm">
                     <span className="rounded-lg border border-mint/40 px-3 py-1.5 text-mint">{isSelected ? 'Selected' : 'Select event'}</span>
                     <Link
