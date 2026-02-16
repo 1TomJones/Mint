@@ -13,7 +13,7 @@ const navItems = [
 ];
 
 export default function Navbar() {
-  const { user, signOut } = useSupabaseAuth();
+  const { user, signOut, isAdmin, adminLoading } = useSupabaseAuth();
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/60 backdrop-blur-2xl">
@@ -29,6 +29,14 @@ export default function Navbar() {
               {item.label}
             </NavLink>
           ))}
+          {!adminLoading && isAdmin && (
+            <NavLink
+              to="/admin"
+              className={({ isActive }) => `text-sm transition ${isActive ? 'text-mint' : 'text-slate-300 hover:text-white'}`}
+            >
+              Admin
+            </NavLink>
+          )}
         </div>
         <div className="flex items-center gap-3">
           {user ? (
