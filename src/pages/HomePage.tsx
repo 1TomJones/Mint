@@ -24,7 +24,7 @@ export default function HomePage() {
           <div className="flex flex-wrap gap-3">
             {loading ? null : user ? (
               <>
-                <PrimaryButton href={isAdmin ? '/admin' : '/multiplayer'}>{isAdmin ? 'Dashboard' : 'Account'}</PrimaryButton>
+                <PrimaryButton href={isAdmin ? '/admin' : '/multiplayer'}>Dashboard</PrimaryButton>
               </>
             ) : (
               <>

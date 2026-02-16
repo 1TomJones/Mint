@@ -60,6 +60,10 @@ function isAllowlistedAdmin(email?: string) {
   return !!normalizedEmail && adminAllowlist.includes(normalizedEmail);
 }
 
+function emitAuthStateChange() {
+  window.dispatchEvent(new CustomEvent('mint-auth-state-change'));
+}
+
 export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [session, setSession] = useState<StoredSession | null>(null);
@@ -100,7 +104,7 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 
     void bootstrap();
 
-    const onStorage = () => {
+    const syncSessionState = () => {
       const stored = readStoredSession();
       setSession(stored);
       setAccessToken(stored?.access_token ?? null);
@@ -108,10 +112,13 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     };
 
-    window.addEventListener('storage', onStorage);
+    window.addEventListener('storage', syncSessionState);
+    window.addEventListener('mint-auth-state-change', syncSessionState);
+
     return () => {
       active = false;
-      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('storage', syncSessionState);
+      window.removeEventListener('mint-auth-state-change', syncSessionState);
     };
   }, []);
 
@@ -158,6 +165,7 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
         setSession(stored);
         setUser(signedInSession.user);
         setAccessToken(signedInSession.access_token);
+        emitAuthStateChange();
       },
       signUp: async (email: string, password: string) => {
         const result = await signUpWithEmail(email, password);
@@ -168,6 +176,7 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
           setSession(stored);
           setUser(result.user);
           setAccessToken(result.access_token);
+          emitAuthStateChange();
           return { needsEmailConfirmation: false };
         }
 
@@ -180,6 +189,7 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
         setAccessToken(null);
         setIsAdmin(false);
         setAdminLoading(false);
+        emitAuthStateChange();
       },
     }),
     [accessToken, adminLoading, isAdmin, loading, session, user],

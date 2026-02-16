@@ -17,14 +17,35 @@ interface ScenarioOption {
 }
 
 const simBaseUrl = (import.meta.env.VITE_PORTFOLIO_SIM_URL as string | undefined)?.replace(/\/$/, '') ?? '';
+const metadataUrlEnv = (import.meta.env.VITE_PORTFOLIO_SIM_METADATA_URL as string | undefined)?.trim() ?? '';
 const backendUrl = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.trim() ?? '';
 
-function scenarioMetadataUrlCandidates() {
-  if (!simBaseUrl) {
-    return [] as string[];
+function resolveScenarioMetadataUrl() {
+  if (metadataUrlEnv) {
+    return metadataUrlEnv;
   }
 
-  return [`${simBaseUrl}/meta/scenarios`, '/meta/scenarios.json'];
+  if (!simBaseUrl) {
+    return '';
+  }
+
+  return `${simBaseUrl}/api/metadata`;
+}
+
+async function parseErrorResponse(response: Response) {
+  const rawBody = await response.text();
+  const hasBody = !!rawBody.trim();
+
+  if (!hasBody) {
+    return `${response.status} ${response.statusText}`.trim();
+  }
+
+  try {
+    const payload = JSON.parse(rawBody) as { error?: string; message?: string };
+    return `${response.status} ${payload.error ?? payload.message ?? response.statusText}`.trim();
+  } catch {
+    return `${response.status} ${rawBody.slice(0, 180)}`.trim();
+  }
 }
 
 function normalizeState(state: string | null | undefined) {
@@ -127,7 +148,7 @@ export default function AdminPage() {
   const [showEnded, setShowEnded] = useState(false);
   const [formErrors, setFormErrors] = useState<{ code?: string; name?: string; scenarioId?: string }>({});
   const [scenarioLoadError, setScenarioLoadError] = useState<string | null>(null);
-  const [scenarioMetadataUrl, setScenarioMetadataUrl] = useState<string>(scenarioMetadataUrlCandidates()[0] ?? `${simBaseUrl}/meta/scenarios`);
+  const [scenarioMetadataUrl, setScenarioMetadataUrl] = useState<string>(resolveScenarioMetadataUrl());
   const [form, setForm] = useState({
     code: 'KENTINVEST01',
     name: '',
@@ -167,63 +188,66 @@ export default function AdminPage() {
   useEffect(() => {
     const loadScenarios = async () => {
       if (!simBaseUrl) {
-        const url = 'VITE_PORTFOLIO_SIM_URL is not configured';
         console.error('[AdminPage] Missing required env var for scenario metadata.', {
           requiredEnvVars: ['VITE_BACKEND_URL', 'VITE_PORTFOLIO_SIM_URL'],
           VITE_BACKEND_URL: backendUrl || '(missing)',
           VITE_PORTFOLIO_SIM_URL: simBaseUrl || '(missing)',
         });
-        setScenarioMetadataUrl(url);
-        setScenarioLoadError(`Cannot load scenarios from portfolio sim metadata URL: ${url}`);
+        setScenarioMetadataUrl('');
+        setScenarioLoadError('Portfolio sim URL not configured.');
         return;
       }
 
-      const endpoints = scenarioMetadataUrlCandidates();
-      let lastTried = endpoints[0] ?? `${simBaseUrl}/meta/scenarios`;
+      const endpoint = resolveScenarioMetadataUrl();
+      setScenarioMetadataUrl(endpoint);
 
-      for (const endpoint of endpoints) {
-        lastTried = endpoint;
-        setScenarioMetadataUrl(endpoint);
+      try {
+        const response = await fetch(endpoint);
+        if (!response.ok) {
+          const details = await parseErrorResponse(response);
+          throw new Error(`Unable to load scenarios (${details}).`);
+        }
+
+        const rawBody = await response.text();
+        let payload: {
+          scenarios?: Array<{ id?: string; scenario_id?: string; name?: string; title?: string; description?: string; duration_minutes?: number; duration?: number }>;
+        } = {};
 
         try {
-          const response = await fetch(endpoint);
-          if (!response.ok) {
-            continue;
-          }
-
-          const payload = (await response.json()) as {
-            scenarios?: Array<{ id?: string; scenario_id?: string; name?: string; title?: string; description?: string; duration_minutes?: number; duration?: number }>;
-          };
-
-          const rows = (payload.scenarios ?? [])
-            .map((scenario) => {
-              const id = scenario.id?.trim() || scenario.scenario_id?.trim() || '';
-              return {
-                id,
-                name: scenario.name?.trim() || scenario.title?.trim() || id,
-                description: scenario.description?.trim() || 'No description provided.',
-                durationMinutes: Number(scenario.duration_minutes ?? scenario.duration ?? 0) || null,
-              };
-            })
-            .filter((scenario) => scenario.id);
-
-          setScenarioLoadError(null);
-          setScenarios(rows);
-          if (rows.length) {
-            setForm((current) => ({
-              ...current,
-              scenarioId: current.scenarioId || rows[0].id,
-              durationMinutes: rows[0].durationMinutes ?? current.durationMinutes,
-            }));
-          }
-          return;
+          payload = JSON.parse(rawBody) as typeof payload;
         } catch {
-          // try the next endpoint
+          throw new Error(`Unable to load scenarios (${response.status} metadata response was not valid JSON).`);
         }
-      }
 
-      setScenarios([]);
-      setScenarioLoadError(`Cannot load scenarios from portfolio sim metadata URL: ${lastTried}`);
+        const rows = (payload.scenarios ?? [])
+          .map((scenario) => {
+            const id = scenario.id?.trim() || scenario.scenario_id?.trim() || '';
+            const durationMinutes = Number(scenario.duration_minutes ?? scenario.duration ?? 0) || null;
+            return {
+              id,
+              name: scenario.name?.trim() || scenario.title?.trim() || id,
+              description: scenario.description?.trim() || 'No description provided.',
+              durationMinutes,
+            };
+          })
+          .filter((scenario) => scenario.id);
+
+        setScenarioLoadError(null);
+        setScenarios(rows);
+        if (rows.length) {
+          setForm((current) => {
+            const defaultScenario = rows.find((row) => row.id === current.scenarioId) ?? rows[0];
+            return {
+              ...current,
+              scenarioId: current.scenarioId || defaultScenario.id,
+              durationMinutes: defaultScenario.durationMinutes ?? current.durationMinutes,
+            };
+          });
+        }
+      } catch (loadError) {
+        setScenarios([]);
+        setScenarioLoadError(loadError instanceof Error ? loadError.message : 'Unable to load scenarios.');
+      }
     };
 
     void loadScenarios();
@@ -400,7 +424,7 @@ export default function AdminPage() {
               >
                 {!scenarios.length && <option value="">No scenarios available</option>}
                 {scenarios.map((scenario) => (
-                  <option key={scenario.id} value={scenario.id}>{scenario.name}</option>
+                  <option key={scenario.id} value={scenario.id}>{scenario.name} ({scenario.durationMinutes ?? '—'} min)</option>
                 ))}
               </select>
               {formErrors.scenarioId && <p className="mt-1 text-xs text-rose-300">{formErrors.scenarioId}</p>}
