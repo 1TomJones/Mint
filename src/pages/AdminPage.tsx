@@ -16,13 +16,15 @@ interface ScenarioOption {
   durationMinutes: number | null;
 }
 
-const fallbackScenarios: ScenarioOption[] = [
-  { id: 'portfolio_basics', name: 'Portfolio Basics', description: 'Foundational multi-asset allocation and rebalancing.', durationMinutes: 45 },
-  { id: 'macro_rotation', name: 'Macro Rotation', description: 'Cross-asset shifts through changing macro regimes.', durationMinutes: 60 },
-  { id: 'risk_off_stress', name: 'Risk-Off Stress', description: 'Stress-test decisions under drawdown pressure.', durationMinutes: 30 },
-];
-
 const simBaseUrl = (import.meta.env.VITE_PORTFOLIO_SIM_URL as string | undefined)?.replace(/\/$/, '') ?? '';
+
+function scenarioMetadataUrlCandidates() {
+  if (!simBaseUrl) {
+    return [] as string[];
+  }
+
+  return [`${simBaseUrl}/meta/scenarios`, `${simBaseUrl}/meta/scenarios.json`];
+}
 
 function normalizeState(state: string | null | undefined) {
   const normalized = (state ?? 'draft').toLowerCase();
@@ -115,7 +117,7 @@ function EventCard({
 export default function AdminPage() {
   const { user, accessToken, isAdmin, adminLoading } = useSupabaseAuth();
   const [events, setEvents] = useState<AdminEvent[]>([]);
-  const [scenarios, setScenarios] = useState<ScenarioOption[]>(fallbackScenarios);
+  const [scenarios, setScenarios] = useState<ScenarioOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [formLoading, setFormLoading] = useState(false);
   const [actionBusyCode, setActionBusyCode] = useState<string | null>(null);
@@ -123,11 +125,13 @@ export default function AdminPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [showEnded, setShowEnded] = useState(false);
   const [formErrors, setFormErrors] = useState<{ code?: string; name?: string; scenarioId?: string }>({});
+  const [scenarioLoadError, setScenarioLoadError] = useState<string | null>(null);
+  const [scenarioMetadataUrl, setScenarioMetadataUrl] = useState<string>(scenarioMetadataUrlCandidates()[0] ?? `${simBaseUrl}/meta/scenarios`);
   const [form, setForm] = useState({
     code: 'KENTINVEST01',
     name: '',
-    scenarioId: fallbackScenarios[0].id,
-    durationMinutes: fallbackScenarios[0].durationMinutes ?? 45,
+    scenarioId: '',
+    durationMinutes: 45,
     state: 'active' as 'draft' | 'active',
   });
 
@@ -160,13 +164,25 @@ export default function AdminPage() {
 
   useEffect(() => {
     const loadScenarios = async () => {
-      if (!simBaseUrl) return;
+      if (!simBaseUrl) {
+        const url = 'VITE_PORTFOLIO_SIM_URL is not configured';
+        setScenarioMetadataUrl(url);
+        setScenarioLoadError(`Cannot load scenarios from portfolio sim metadata URL: ${url}`);
+        return;
+      }
 
-      const endpoints = [`${simBaseUrl}/meta/scenarios`, `${simBaseUrl}/meta/scenarios.json`];
+      const endpoints = scenarioMetadataUrlCandidates();
+      let lastTried = endpoints[0] ?? `${simBaseUrl}/meta/scenarios`;
+
       for (const endpoint of endpoints) {
+        lastTried = endpoint;
+        setScenarioMetadataUrl(endpoint);
+
         try {
           const response = await fetch(endpoint);
-          if (!response.ok) continue;
+          if (!response.ok) {
+            continue;
+          }
 
           const payload = (await response.json()) as {
             scenarios?: Array<{ id?: string; scenario_id?: string; name?: string; title?: string; description?: string; duration_minutes?: number; duration?: number }>;
@@ -184,19 +200,25 @@ export default function AdminPage() {
             })
             .filter((scenario) => scenario.id);
 
-          if (rows.length) {
-            setScenarios(rows);
-            setForm((current) => ({
-              ...current,
-              scenarioId: rows[0].id,
-              durationMinutes: rows[0].durationMinutes ?? current.durationMinutes,
-            }));
-            return;
+          if (!rows.length) {
+            continue;
           }
+
+          setScenarioLoadError(null);
+          setScenarios(rows);
+          setForm((current) => ({
+            ...current,
+            scenarioId: current.scenarioId || rows[0].id,
+            durationMinutes: rows[0].durationMinutes ?? current.durationMinutes,
+          }));
+          return;
         } catch {
           // try the next endpoint
         }
       }
+
+      setScenarios([]);
+      setScenarioLoadError(`Cannot load scenarios from portfolio sim metadata URL: ${lastTried}`);
     };
 
     void loadScenarios();
@@ -367,9 +389,11 @@ export default function AdminPage() {
                   }));
                   setFormErrors((current) => ({ ...current, scenarioId: undefined }));
                 }}
-                className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5"
+                className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 disabled:opacity-60"
                 required
+                disabled={!scenarios.length}
               >
+                {!scenarios.length && <option value="">No scenarios available</option>}
                 {scenarios.map((scenario) => (
                   <option key={scenario.id} value={scenario.id}>{scenario.name}</option>
                 ))}
@@ -400,6 +424,16 @@ export default function AdminPage() {
           </form>
           {toast && <p className="mt-3 text-sm text-mint">{toast}</p>}
           {error && <p className="mt-3 rounded-lg border border-rose-400/25 bg-rose-900/20 p-3 text-sm text-rose-200">{error}</p>}
+          {scenarioLoadError && <p className="mt-3 rounded-lg border border-rose-400/25 bg-rose-900/20 p-3 text-sm text-rose-200">{scenarioLoadError}</p>}
+          {import.meta.env.DEV && (
+            <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/70 p-3 text-xs text-slate-300">
+              <p className="font-semibold uppercase tracking-[0.16em] text-slate-400">Debug (dev only)</p>
+              <p className="mt-2"><span className="text-slate-400">Backend URL:</span> {import.meta.env.VITE_BACKEND_URL || '—'}</p>
+              <p><span className="text-slate-400">Portfolio Sim URL:</span> {simBaseUrl || '—'}</p>
+              <p><span className="text-slate-400">Scenario metadata URL:</span> {scenarioMetadataUrl || '—'}</p>
+              <p><span className="text-slate-400">Scenarios loaded:</span> {scenarios.length}</p>
+            </div>
+          )}
         </article>
 
         <article className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">

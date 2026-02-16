@@ -1,10 +1,10 @@
-const backendUrl = import.meta.env.VITE_BACKEND_URL as string | undefined;
+import { apiFetch } from './api';
 
 interface BackendOptions {
   method?: 'GET' | 'POST' | 'PATCH';
   body?: unknown;
   accessToken?: string;
-  userId?: string;
+  requireAuth?: boolean;
 }
 
 interface BackendErrorPayload {
@@ -23,18 +23,13 @@ function toReadableError(rawBody: string) {
 }
 
 async function backendRequest<T>(path: string, options: BackendOptions = {}) {
-  if (!backendUrl) {
-    throw new Error('Missing VITE_BACKEND_URL environment variable.');
-  }
-
-  const response = await fetch(`${backendUrl}${path}`, {
+  const response = await apiFetch(path, {
     method: options.method ?? 'GET',
+    body: options.body,
+    requireAuth: options.requireAuth,
     headers: {
-      'Content-Type': 'application/json',
       ...(options.accessToken ? { Authorization: `Bearer ${options.accessToken}` } : {}),
-      ...(options.userId ? { 'x-user-id': options.userId } : {}),
     },
-    body: options.body ? JSON.stringify(options.body) : undefined,
   });
 
   const rawBody = await response.text();
@@ -60,12 +55,10 @@ export interface CreateRunResponse {
   simUrl: string;
 }
 
-export function createRunByCode(eventCode: string, userId: string, accessToken?: string) {
+export function createRunByCode(eventCode: string) {
   return backendRequest<CreateRunResponse>('/api/runs/create', {
     method: 'POST',
-    body: { eventCode, userId },
-    userId,
-    accessToken,
+    body: { eventCode },
   });
 }
 
@@ -118,10 +111,9 @@ export interface BackendRunDetail {
   }[];
 }
 
-export function fetchRunDetailById(runId: string, accessToken?: string, userId?: string) {
+export function fetchRunDetailById(runId: string, accessToken?: string) {
   return backendRequest<{ run: BackendRunDetail }>(`/api/runs/${encodeURIComponent(runId)}`, {
     accessToken,
-    userId,
   });
 }
 
@@ -196,9 +188,9 @@ export interface PublicEvent {
   ended_at?: string | null;
 }
 
-export function fetchPublicEvents(accessToken?: string) {
-  return backendRequest<{ events: PublicEvent[] }>('/api/events', {
-    accessToken,
+export function fetchPublicEvents() {
+  return backendRequest<{ events: PublicEvent[] }>('/api/events/public', {
+    requireAuth: false,
   });
 }
 
