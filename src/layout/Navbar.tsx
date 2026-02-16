@@ -44,7 +44,7 @@ export default function Navbar() {
               <Link to={isAdmin ? '/admin' : '/multiplayer'} className="rounded-xl2 border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-mint/40 hover:text-mint">
                 Dashboard
               </Link>
-              <button onClick={signOut} className="rounded-xl2 border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-mint/40 hover:text-mint">
+              <button onClick={() => void signOut()} className="rounded-xl2 border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-mint/40 hover:text-mint">
                 Sign out
               </button>
             </>

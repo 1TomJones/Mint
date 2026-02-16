@@ -1,5 +1,8 @@
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+import { appEnv } from './env';
+
+const STORAGE_KEY = 'mint.supabase.session';
+const supabaseUrl = appEnv.supabaseUrl;
+const supabaseAnonKey = appEnv.supabaseAnonKey;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('Missing Supabase env vars: VITE_SUPABASE_URL and/or VITE_SUPABASE_ANON_KEY');
@@ -15,6 +18,47 @@ interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH';
   accessToken?: string;
   body?: unknown;
+}
+
+export interface AuthUser {
+  id: string;
+  email?: string;
+}
+
+export interface Session {
+  access_token: string;
+  refresh_token?: string;
+  user: AuthUser;
+}
+
+type AuthListener = (event: 'SIGNED_IN' | 'SIGNED_OUT' | 'TOKEN_REFRESHED', session: Session | null) => void;
+const listeners = new Set<AuthListener>();
+
+function emitAuth(event: 'SIGNED_IN' | 'SIGNED_OUT' | 'TOKEN_REFRESHED', session: Session | null) {
+  listeners.forEach((listener) => listener(event, session));
+}
+
+function readStoredSession(): Session | null {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as Session;
+  } catch {
+    localStorage.removeItem(STORAGE_KEY);
+    return null;
+  }
+}
+
+function persistSession(session: Session | null) {
+  if (!session) {
+    localStorage.removeItem(STORAGE_KEY);
+    return;
+  }
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
 }
 
 async function supabaseRequest<T>(path: string, options: RequestOptions = {}) {
@@ -44,34 +88,69 @@ async function supabaseRequest<T>(path: string, options: RequestOptions = {}) {
   return (await response.json()) as T;
 }
 
-export interface SupabaseSession {
+interface SignInResponse {
   access_token: string;
-  refresh_token: string;
-  user: {
-    id: string;
-    email?: string;
-  };
+  refresh_token?: string;
+  user: AuthUser;
 }
 
-export function signUpWithEmail(email: string, password: string) {
-  return supabaseRequest<SupabaseSession | { user: SupabaseSession['user']; session: null }>('/auth/v1/signup', {
-    method: 'POST',
-    body: { email, password },
-  });
+interface SignUpResponse {
+  user: AuthUser;
+  session: Session | null;
 }
 
-export function signInWithEmail(email: string, password: string) {
-  return supabaseRequest<SupabaseSession>('/auth/v1/token?grant_type=password', {
-    method: 'POST',
-    body: { email, password },
-  });
-}
-
-export function getCurrentUser(accessToken: string) {
-  return supabaseRequest<SupabaseSession['user']>('/auth/v1/user', {
-    accessToken,
-  });
-}
+export const supabase = {
+  auth: {
+    async getSession() {
+      return { data: { session: readStoredSession() }, error: null as Error | null };
+    },
+    onAuthStateChange(callback: AuthListener) {
+      listeners.add(callback);
+      return {
+        data: {
+          subscription: {
+            unsubscribe() {
+              listeners.delete(callback);
+            },
+          },
+        },
+      };
+    },
+    async signInWithPassword({ email, password }: { email: string; password: string }) {
+      try {
+        const session = await supabaseRequest<SignInResponse>('/auth/v1/token?grant_type=password', {
+          method: 'POST',
+          body: { email, password },
+        });
+        persistSession(session);
+        emitAuth('SIGNED_IN', session);
+        return { data: { session }, error: null as Error | null };
+      } catch (error) {
+        return { data: { session: null }, error: error as Error };
+      }
+    },
+    async signUp({ email, password }: { email: string; password: string }) {
+      try {
+        const result = await supabaseRequest<SignUpResponse>('/auth/v1/signup', {
+          method: 'POST',
+          body: { email, password },
+        });
+        if (result.session) {
+          persistSession(result.session);
+          emitAuth('SIGNED_IN', result.session);
+        }
+        return { data: result, error: null as Error | null };
+      } catch (error) {
+        return { data: { user: null, session: null }, error: error as Error };
+      }
+    },
+    async signOut() {
+      persistSession(null);
+      emitAuth('SIGNED_OUT', null);
+      return { error: null as Error | null };
+    },
+  },
+};
 
 export interface EventRow {
   id: string;
@@ -94,26 +173,6 @@ export interface RunRow {
     sharpe: number | null;
     max_drawdown: number | null;
   }[];
-}
-
-export function fetchEvents(accessToken: string) {
-  return supabaseRequest<EventRow[]>('/rest/v1/events?select=id,code,name,sim_url,starts_at,ends_at&order=starts_at.desc.nullslast', {
-    accessToken,
-  });
-}
-
-export function findEventByCode(code: string, accessToken: string) {
-  return supabaseRequest<EventRow[]>(`/rest/v1/events?select=id,code,name,sim_url&code=eq.${encodeURIComponent(code)}&limit=1`, {
-    accessToken,
-  });
-}
-
-export function createRun(eventId: string, userId: string, accessToken: string) {
-  return supabaseRequest<Array<{ id: string; created_at: string }>>('/rest/v1/runs?select=id,created_at', {
-    method: 'POST',
-    accessToken,
-    body: [{ event_id: eventId, user_id: userId }],
-  });
 }
 
 export function fetchUserRuns(userId: string, accessToken: string) {

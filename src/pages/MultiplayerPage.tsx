@@ -68,7 +68,10 @@ export default function MultiplayerPage() {
     void load();
   }, [accessToken, user]);
 
-  const activeEvents = useMemo(() => events.filter((event) => ['active', 'live', 'paused'].includes((event.state ?? '').toLowerCase())), [events]);
+  const activeEvents = useMemo(
+    () => events.filter((event) => ['active', 'running', 'live', 'paused'].includes((event.state ?? '').toLowerCase())),
+    [events],
+  );
   const scenarioById = useMemo(() => new Map(scenarios.map((scenario) => [scenario.id, scenario.title])), [scenarios]);
 
   useEffect(() => {
@@ -87,7 +90,7 @@ export default function MultiplayerPage() {
   const handleJoin = async (event: FormEvent) => {
     event.preventDefault();
     if (!user || !accessToken) {
-      setError('Please sign in to join');
+      setError('Please sign in first');
       return;
     }
 
@@ -98,7 +101,7 @@ export default function MultiplayerPage() {
     try {
       setJoining(true);
       setError(null);
-      const createdRun = await createRunByCode(eventCode.trim().toUpperCase(), accessToken);
+      const createdRun = await createRunByCode(eventCode.trim().toUpperCase(), user.id, accessToken);
       window.open(createdRun.launchUrl, '_blank', 'noopener,noreferrer');
       setToast('Run created — sim opened in new tab');
       setEventCode('');
@@ -152,7 +155,7 @@ export default function MultiplayerPage() {
             <p className="mt-2 text-sm text-slate-300">Enter your event code to create a run and launch the external simulation.</p>
             {!user && (
               <p className="mt-2 rounded-lg border border-amber-400/30 bg-amber-900/20 p-3 text-sm text-amber-200">
-                Please sign in to join events.
+                Please sign in first.
               </p>
             )}
             <form className="mt-4 flex flex-col gap-3 sm:flex-row" onSubmit={handleJoin}>
