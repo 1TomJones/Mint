@@ -167,17 +167,37 @@ export function fetchAdminEvents(accessToken: string) {
 export interface CreateAdminEventInput {
   code: string;
   name: string;
-  simType: string;
-  scenarioId: string;
-  durationMinutes: number;
-  state: 'draft' | 'active';
-  simUrl: string;
+  sim_type: string;
+  scenario_id: string;
+  duration_minutes: number;
+  state?: 'draft' | 'active';
+  sim_url: string;
 }
 
 export function createAdminEvent(payload: CreateAdminEventInput, accessToken: string) {
   return backendRequest<{ event: AdminEvent }>('/api/events', {
     method: 'POST',
     body: payload,
+    accessToken,
+  });
+}
+
+export interface PublicEvent {
+  id: string;
+  code: string;
+  name: string;
+  sim_url: string;
+  sim_type: string | null;
+  scenario_id: string | null;
+  duration_minutes: number | null;
+  state: string | null;
+  created_at: string;
+  started_at?: string | null;
+  ended_at?: string | null;
+}
+
+export function fetchPublicEvents(accessToken?: string) {
+  return backendRequest<{ events: PublicEvent[] }>('/api/events', {
     accessToken,
   });
 }
