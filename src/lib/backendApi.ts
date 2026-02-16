@@ -141,3 +141,47 @@ export function submitRunResults(payload: SubmitRunPayload) {
     body: payload,
   });
 }
+
+export interface AdminEvent {
+  id: string;
+  code: string;
+  name: string;
+  sim_url: string;
+  sim_type: string | null;
+  scenario_id: string | null;
+  duration_minutes: number | null;
+  state: string | null;
+  created_at: string;
+}
+
+export function fetchAdminStatus(accessToken: string) {
+  return backendRequest<{ isAdmin: boolean }>('/api/admin/me', { accessToken });
+}
+
+export function fetchAdminEvents(accessToken: string) {
+  return backendRequest<{ events: AdminEvent[] }>('/api/admin/events', { accessToken });
+}
+
+export interface CreateAdminEventInput {
+  code: string;
+  name: string;
+  simType: string;
+  scenarioId: string;
+  durationMinutes: number;
+  state: 'draft' | 'active';
+  simUrl: string;
+}
+
+export function createAdminEvent(payload: CreateAdminEventInput, accessToken: string) {
+  return backendRequest<{ event: AdminEvent }>('/api/admin/events', {
+    method: 'POST',
+    body: payload,
+    accessToken,
+  });
+}
+
+export function fetchSimAdminLink(eventCode: string, accessToken: string) {
+  return backendRequest<{ adminUrl: string }>(`/api/admin/events/${encodeURIComponent(eventCode)}/sim-admin-link`, {
+    accessToken,
+  });
+}

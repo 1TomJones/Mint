@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 import { EventRow, RunRow, fetchEvents, fetchUserRuns } from '../lib/supabase';
 import { createRunByCode } from '../lib/backendApi';
@@ -23,6 +23,7 @@ function formatErrorMessage(message: string) {
 
 export default function MultiplayerPage() {
   const { user, accessToken } = useSupabaseAuth();
+  const [searchParams] = useSearchParams();
   const [eventCode, setEventCode] = useState('');
   const [events, setEvents] = useState<EventRow[]>([]);
   const [runs, setRuns] = useState<RunRow[]>([]);
@@ -53,6 +54,18 @@ export default function MultiplayerPage() {
   }, [accessToken, user]);
 
   const activeEvents = useMemo(() => events.filter((event) => !event.ends_at || new Date(event.ends_at) > new Date()), [events]);
+
+  useEffect(() => {
+    const prefilledCode = searchParams.get('code');
+    if (!prefilledCode) {
+      return;
+    }
+
+    setEventCode(prefilledCode.toUpperCase());
+    setToast(`Code ${prefilledCode.toUpperCase()} loaded into Join input.`);
+    const timeoutId = window.setTimeout(() => setToast(null), 2500);
+    return () => window.clearTimeout(timeoutId);
+  }, [searchParams]);
   const liveEvent = activeEvents[0] ?? null;
 
   if (!user) {
@@ -195,24 +208,38 @@ export default function MultiplayerPage() {
         <article className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
           <h2 className="text-lg font-semibold">Active events</h2>
           <div className="mt-4 space-y-3">
-            {activeEvents.slice(0, 8).map((event) => (
-              <div key={event.id} className="rounded-xl border border-white/10 bg-slate-950/60 p-4">
-                <p className="text-sm font-medium">{event.name}</p>
-                <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-400">Code: {event.code}</p>
-                <div className="mt-3 flex items-center gap-3 text-sm">
-                  <button
-                    type="button"
-                    onClick={() => handleUseEventCode(event.code)}
-                    className="rounded-lg border border-mint/40 px-3 py-1.5 text-mint transition hover:border-mint hover:bg-mint/10"
-                  >
-                    Use code
-                  </button>
-                  <Link className="text-slate-300 hover:text-white" to={`/multiplayer/events/${event.code}`}>
-                    View details
-                  </Link>
+            {activeEvents.slice(0, 8).map((event) => {
+              const isSelected = eventCode.trim().toUpperCase() === event.code;
+
+              return (
+                <div
+                  key={event.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleUseEventCode(event.code)}
+                  onKeyDown={(keyboardEvent) => {
+                    if (keyboardEvent.key === "Enter" || keyboardEvent.key === " ") {
+                      keyboardEvent.preventDefault();
+                      handleUseEventCode(event.code);
+                    }
+                  }}
+                  className={`w-full rounded-xl border bg-slate-950/60 p-4 text-left transition ${isSelected ? 'border-mint/70 shadow-[0_0_0_1px_rgba(52,211,153,0.35)]' : 'border-white/10 hover:border-mint/40'}`}
+                >
+                  <p className="text-sm font-medium">{event.name}</p>
+                  <p className="mt-1 text-xs uppercase tracking-[0.2em] text-slate-400">Code: {event.code}</p>
+                  <div className="mt-3 flex items-center gap-3 text-sm">
+                    <span className="rounded-lg border border-mint/40 px-3 py-1.5 text-mint">{isSelected ? 'Selected' : 'Select event'}</span>
+                    <Link
+                      onClick={(linkEvent) => linkEvent.stopPropagation()}
+                      className="text-slate-300 hover:text-white"
+                      to={`/multiplayer/events/${event.code}`}
+                    >
+                      View details
+                    </Link>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {!activeEvents.length && <p className="text-sm text-slate-400">No public active events right now.</p>}
           </div>
         </article>

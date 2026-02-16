@@ -5,6 +5,11 @@ import { createClient } from '@supabase/supabase-js';
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
+const simAdminToken = process.env.SIM_ADMIN_TOKEN ?? '';
+const adminAllowlist = (process.env.ADMIN_ALLOWLIST_EMAILS ?? '')
+  .split(',')
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -33,8 +38,208 @@ function formatTrader(userId) {
   return `user-${userId.slice(0, 8)}`;
 }
 
+async function getAuthenticatedUser(req) {
+  const authorization = req.header('authorization') ?? '';
+  const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+
+  if (!token) {
+    return null;
+  }
+
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error) {
+    throw error;
+  }
+
+  return data.user ?? null;
+}
+
+async function isAdminUser(req) {
+  const user = await getAuthenticatedUser(req);
+  if (!user) {
+    return false;
+  }
+
+  const email = user.email?.toLowerCase() ?? '';
+  if (email && adminAllowlist.includes(email)) {
+    return true;
+  }
+
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('is_admin')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (error) {
+    if (error.code === 'PGRST116' || /relation .*profiles/i.test(error.message ?? '')) {
+      return false;
+    }
+    throw error;
+  }
+
+  return Boolean(profile?.is_admin);
+}
+
+async function requireAdmin(req, res) {
+  try {
+    const isAdmin = await isAdminUser(req);
+    if (!isAdmin) {
+      res.status(403).json({ error: 'Admin access required' });
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    res.status(401).json({ error: error instanceof Error ? error.message : 'Invalid authorization' });
+    return false;
+  }
+}
+
+function isMissingColumnError(error) {
+  const message = error?.message ?? '';
+  return /column .* does not exist/i.test(message);
+}
+
+
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
+});
+
+app.get('/api/admin/me', async (req, res) => {
+  try {
+    const isAdmin = await isAdminUser(req);
+    return res.json({ isAdmin });
+  } catch (error) {
+    return res.status(401).json({ error: error instanceof Error ? error.message : 'Invalid authorization' });
+  }
+});
+
+app.get('/api/admin/events', async (req, res) => {
+  if (!(await requireAdmin(req, res))) {
+    return;
+  }
+
+  try {
+    let query = supabase
+      .from('events')
+      .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at')
+      .order('created_at', { ascending: false });
+
+    let { data: events, error } = await query;
+
+    if (error && isMissingColumnError(error)) {
+      const fallback = await supabase
+        .from('events')
+        .select('id,code,name,sim_url,created_at,starts_at,ends_at')
+        .order('created_at', { ascending: false });
+      events = (fallback.data ?? []).map((event) => ({
+        ...event,
+        sim_type: 'portfolio_sim',
+        scenario_id: null,
+        duration_minutes: null,
+        state: 'draft',
+      }));
+      error = fallback.error;
+    }
+
+    if (error) {
+      throw error;
+    }
+
+    return res.json({ events: events ?? [] });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to fetch events' });
+  }
+});
+
+app.post('/api/admin/events', async (req, res) => {
+  if (!(await requireAdmin(req, res))) {
+    return;
+  }
+
+  try {
+    const payload = {
+      code: req.body?.code?.toString().trim().toUpperCase(),
+      name: req.body?.name?.toString().trim(),
+      sim_type: req.body?.simType?.toString().trim() || 'portfolio_sim',
+      scenario_id: req.body?.scenarioId?.toString().trim() || null,
+      duration_minutes: Number(req.body?.durationMinutes ?? 0) || null,
+      state: req.body?.state?.toString().trim() || 'draft',
+      sim_url: req.body?.simUrl?.toString().trim() || null,
+    };
+
+    if (!payload.code || !payload.name) {
+      return res.status(400).json({ error: 'code and name are required' });
+    }
+
+    let insertResult = await supabase
+      .from('events')
+      .insert(payload)
+      .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at')
+      .single();
+
+    if (insertResult.error && isMissingColumnError(insertResult.error)) {
+      insertResult = await supabase
+        .from('events')
+        .insert({ code: payload.code, name: payload.name, sim_url: payload.sim_url })
+        .select('id,code,name,sim_url,created_at,starts_at,ends_at')
+        .single();
+      if (!insertResult.error && insertResult.data) {
+        insertResult.data = {
+          ...insertResult.data,
+          sim_type: payload.sim_type,
+          scenario_id: payload.scenario_id,
+          duration_minutes: payload.duration_minutes,
+          state: payload.state,
+        };
+      }
+    }
+
+    if (insertResult.error) {
+      throw insertResult.error;
+    }
+
+    return res.status(201).json({ event: insertResult.data });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to create event' });
+  }
+});
+
+app.get('/api/admin/events/:code/sim-admin-link', async (req, res) => {
+  if (!(await requireAdmin(req, res))) {
+    return;
+  }
+
+  try {
+    const code = req.params.code?.trim().toUpperCase();
+    if (!code) {
+      return res.status(400).json({ error: 'event code is required' });
+    }
+
+    const { data: event, error } = await supabase
+      .from('events')
+      .select('code,sim_url')
+      .eq('code', code)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!event?.sim_url) {
+      return res.status(404).json({ error: 'Event or sim_url not found' });
+    }
+
+    const adminBaseUrl = event.sim_url.endsWith('/') ? `${event.sim_url}admin.html` : `${event.sim_url}/admin.html`;
+    const adminUrl = new URL(adminBaseUrl);
+    adminUrl.searchParams.set('event_code', code);
+    adminUrl.searchParams.set('admin_token', simAdminToken);
+
+    return res.json({ adminUrl: adminUrl.toString() });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to generate admin link' });
+  }
 });
 
 app.post('/api/runs/create', async (req, res) => {
@@ -50,11 +255,21 @@ app.post('/api/runs/create', async (req, res) => {
       return res.status(400).json({ error: 'userId is required for MVP run creation' });
     }
 
-    const { data: event, error: eventError } = await supabase
+    let { data: event, error: eventError } = await supabase
       .from('events')
-      .select('id,sim_url')
+      .select('id,code,sim_url,scenario_id')
       .eq('code', eventCode)
       .maybeSingle();
+
+    if (eventError && isMissingColumnError(eventError)) {
+      const fallback = await supabase
+        .from('events')
+        .select('id,code,sim_url')
+        .eq('code', eventCode)
+        .maybeSingle();
+      event = fallback.data ? { ...fallback.data, scenario_id: null } : fallback.data;
+      eventError = fallback.error;
+    }
 
     if (eventError) {
       throw eventError;
@@ -74,10 +289,14 @@ app.post('/api/runs/create', async (req, res) => {
       throw runError;
     }
 
-    const joiner = event.sim_url.includes('?') ? '&' : '?';
-    const simUrl = `${event.sim_url}${joiner}run_id=${encodeURIComponent(run.id)}`;
+    const simUrl = new URL(event.sim_url);
+    simUrl.searchParams.set('run_id', run.id);
+    simUrl.searchParams.set('event_code', event.code);
+    if (event.scenario_id) {
+      simUrl.searchParams.set('scenario_id', event.scenario_id);
+    }
 
-    return res.status(200).json({ runId: run.id, simUrl });
+    return res.status(200).json({ runId: run.id, simUrl: simUrl.toString() });
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : 'Unexpected error creating run' });
   }

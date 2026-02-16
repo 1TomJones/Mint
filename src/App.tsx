@@ -4,6 +4,7 @@ import { AuthMockProvider } from './context/AuthMockContext';
 import { SupabaseAuthProvider } from './context/SupabaseAuthContext';
 import Layout from './layout/Layout';
 import AboutPage from './pages/AboutPage';
+import AdminPage from './pages/AdminPage';
 import AuthPage from './pages/AuthPage';
 import CommunityPage from './pages/CommunityPage';
 import ContactPage from './pages/ContactPage';
@@ -37,6 +38,14 @@ export default function App() {
             <Route path="/about" element={<AboutPage />} />
             <Route path="/contact" element={<ContactPage />} />
             <Route path="/multiplayer" element={<MultiplayerPage />} />
+            <Route
+              path="/admin"
+              element={(
+                <ProtectedRoute>
+                  <AdminPage />
+                </ProtectedRoute>
+              )}
+            />
             <Route
               path="/multiplayer/runs/:runId"
               element={(
