@@ -33,7 +33,7 @@ function toRunDetail(data: BackendRunDetail): RunDetail {
 
 export default function MultiplayerRunDetailPage() {
   const { runId } = useParams();
-  const { accessToken, user } = useSupabaseAuth();
+  const { accessToken } = useSupabaseAuth();
   const [run, setRun] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,7 +45,7 @@ export default function MultiplayerRunDetailPage() {
 
       try {
         setError(null);
-        const response = await fetchRunDetailById(runId, accessToken, user?.id);
+        const response = await fetchRunDetailById(runId, accessToken);
         setRun(toRunDetail(response.run));
       } catch {
         try {
@@ -58,7 +58,7 @@ export default function MultiplayerRunDetailPage() {
     };
 
     void load();
-  }, [accessToken, runId, user?.id]);
+  }, [accessToken, runId]);
 
   if (error) {
     return <section className="container-wide py-16 text-rose-300">{error}</section>;

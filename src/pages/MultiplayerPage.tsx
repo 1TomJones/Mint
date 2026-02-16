@@ -27,26 +27,37 @@ export default function MultiplayerPage() {
   const [eventCode, setEventCode] = useState('');
   const [events, setEvents] = useState<PublicEvent[]>([]);
   const [runs, setRuns] = useState<RunRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [runsLoading, setRunsLoading] = useState(true);
   const [joining, setJoining] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
+      try {
+        setEventsLoading(true);
+        const eventsData = await fetchPublicEvents();
+        setEvents(eventsData.events);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load multiplayer data.');
+      } finally {
+        setEventsLoading(false);
+      }
+
       if (!accessToken || !user) {
+        setRunsLoading(false);
         return;
       }
 
       try {
-        setLoading(true);
-        const [eventsData, runsData] = await Promise.all([fetchPublicEvents(accessToken), fetchUserRuns(user.id, accessToken)]);
-        setEvents(eventsData.events);
+        setRunsLoading(true);
+        const runsData = await fetchUserRuns(user.id, accessToken);
         setRuns(runsData);
       } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : 'Failed to load multiplayer data.');
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load run history.');
       } finally {
-        setLoading(false);
+        setRunsLoading(false);
       }
     };
 
@@ -68,31 +79,16 @@ export default function MultiplayerPage() {
   }, [searchParams]);
   const liveEvent = activeEvents[0] ?? null;
 
-  if (!user) {
-    return (
-      <section className="container-wide py-20">
-        <div className="mx-auto max-w-2xl rounded-3xl border border-white/10 bg-panel p-10 text-center">
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Multiplayer Sims</p>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight">This area is locked.</h1>
-          <p className="mt-4 text-slate-300">Sign in to join live university events, launch the simulation, and keep your run history permanently.</p>
-          <Link to="/login" className="mt-7 inline-flex rounded-xl2 bg-mint px-5 py-2.5 text-sm font-semibold text-slate-900">
-            Sign in to join
-          </Link>
-        </div>
-      </section>
-    );
-  }
-
   const handleJoin = async (event: FormEvent) => {
     event.preventDefault();
-    if (!accessToken || !eventCode.trim()) {
+    if (!user || !accessToken || !eventCode.trim()) {
       return;
     }
 
     try {
       setJoining(true);
       setError(null);
-      const createdRun = await createRunByCode(eventCode.trim().toUpperCase(), user.id, accessToken);
+      const createdRun = await createRunByCode(eventCode.trim().toUpperCase());
       window.open(createdRun.simUrl, '_blank', 'noopener,noreferrer');
       setToast('Run created — sim opened in new tab');
       setEventCode('');
@@ -144,20 +140,32 @@ export default function MultiplayerPage() {
           <article className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
             <h2 className="text-lg font-semibold">Join an event</h2>
             <p className="mt-2 text-sm text-slate-300">Enter your event code to create a run and launch the external simulation.</p>
+            {!user && (
+              <p className="mt-2 rounded-lg border border-amber-400/30 bg-amber-900/20 p-3 text-sm text-amber-200">
+                Please sign in to join events.
+              </p>
+            )}
             <form className="mt-4 flex flex-col gap-3 sm:flex-row" onSubmit={handleJoin}>
-              <input value={eventCode} onChange={(event) => setEventCode(event.target.value)} className="flex-1 rounded-xl border border-white/10 bg-slate-950 px-4 py-2.5 uppercase" placeholder="Event Code" />
-              <button disabled={joining} className="rounded-xl2 bg-mint px-5 py-2.5 text-sm font-semibold text-slate-900 disabled:opacity-60">
+              <input disabled={!user} value={eventCode} onChange={(event) => setEventCode(event.target.value)} className="flex-1 rounded-xl border border-white/10 bg-slate-950 px-4 py-2.5 uppercase disabled:opacity-60" placeholder="Event Code" />
+              <button disabled={joining || !user} className="rounded-xl2 bg-mint px-5 py-2.5 text-sm font-semibold text-slate-900 disabled:opacity-60">
                 {joining ? 'Joining…' : 'Join'}
               </button>
             </form>
+            {!user && (
+              <Link to="/login" className="mt-3 inline-flex text-sm text-mint hover:text-mint/80">
+                Sign in to join
+              </Link>
+            )}
             {toast && <p className="mt-3 text-sm text-mint">{toast}</p>}
             {error && <pre className="mt-3 whitespace-pre-wrap rounded-lg border border-rose-300/20 bg-rose-900/20 p-3 text-sm text-rose-200">{error}</pre>}
           </article>
 
           <article className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
             <h2 className="text-lg font-semibold">Your runs</h2>
-            {loading ? (
+            {runsLoading ? (
               <p className="mt-3 text-sm text-slate-300">Loading your run history…</p>
+            ) : !user ? (
+              <p className="mt-3 text-sm text-slate-300">Sign in to view your run history.</p>
             ) : (
               <div className="mt-4 overflow-x-auto">
                 <table className="w-full min-w-[740px] text-left text-sm">
@@ -240,7 +248,8 @@ export default function MultiplayerPage() {
                 </div>
               );
             })}
-            {!activeEvents.length && <p className="text-sm text-slate-400">No public active events right now.</p>}
+            {eventsLoading ? <p className="text-sm text-slate-400">Loading public active events…</p> : null}
+            {!eventsLoading && !activeEvents.length && <p className="text-sm text-slate-400">No public active events right now.</p>}
           </div>
         </article>
       </div>
