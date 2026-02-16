@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
-import { EventRow, RunRow, fetchEvents, fetchUserRuns } from '../lib/supabase';
-import { createRunByCode } from '../lib/backendApi';
+import { RunRow, fetchUserRuns } from '../lib/supabase';
+import { createRunByCode, fetchPublicEvents, type PublicEvent } from '../lib/backendApi';
 
 function formatMetric(value: number | null | undefined) {
   if (value === null || value === undefined) {
@@ -25,7 +25,7 @@ export default function MultiplayerPage() {
   const { user, accessToken } = useSupabaseAuth();
   const [searchParams] = useSearchParams();
   const [eventCode, setEventCode] = useState('');
-  const [events, setEvents] = useState<EventRow[]>([]);
+  const [events, setEvents] = useState<PublicEvent[]>([]);
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
@@ -40,8 +40,8 @@ export default function MultiplayerPage() {
 
       try {
         setLoading(true);
-        const [eventsData, runsData] = await Promise.all([fetchEvents(accessToken), fetchUserRuns(user.id, accessToken)]);
-        setEvents(eventsData);
+        const [eventsData, runsData] = await Promise.all([fetchPublicEvents(accessToken), fetchUserRuns(user.id, accessToken)]);
+        setEvents(eventsData.events);
         setRuns(runsData);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : 'Failed to load multiplayer data.');
@@ -53,7 +53,7 @@ export default function MultiplayerPage() {
     void load();
   }, [accessToken, user]);
 
-  const activeEvents = useMemo(() => events.filter((event) => !event.ends_at || new Date(event.ends_at) > new Date()), [events]);
+  const activeEvents = useMemo(() => events.filter((event) => ['active', 'live', 'paused'].includes((event.state ?? '').toLowerCase())), [events]);
 
   useEffect(() => {
     const prefilledCode = searchParams.get('code');

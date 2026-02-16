@@ -207,6 +207,42 @@ app.post('/api/admin/events', async (req, res) => {
 });
 
 
+
+app.get('/api/events', async (req, res) => {
+  try {
+    let query = supabase
+      .from('events')
+      .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at,started_at,ended_at')
+      .in('state', ['active', 'live', 'paused'])
+      .order('created_at', { ascending: false });
+
+    let { data: events, error } = await query;
+
+    if (error && isMissingColumnError(error)) {
+      const fallback = await supabase
+        .from('events')
+        .select('id,code,name,sim_url,created_at,starts_at,ends_at,started_at,ended_at')
+        .order('created_at', { ascending: false });
+      events = (fallback.data ?? []).map((event) => ({
+        ...event,
+        sim_type: 'portfolio',
+        scenario_id: null,
+        duration_minutes: null,
+        state: 'active',
+      }));
+      error = fallback.error;
+    }
+
+    if (error) {
+      throw error;
+    }
+
+    return res.json({ events: events ?? [] });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to fetch public events' });
+  }
+});
+
 app.post('/api/events', async (req, res) => {
   if (!(await requireAdmin(req, res))) {
     return;

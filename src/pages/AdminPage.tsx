@@ -2,7 +2,6 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import {
   createAdminEvent,
-  createRunByCode,
   fetchAdminEvents,
   fetchSimAdminLink,
   updateAdminEventState,
@@ -13,12 +12,14 @@ import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 interface ScenarioOption {
   id: string;
   name: string;
+  description: string;
+  durationMinutes: number | null;
 }
 
 const fallbackScenarios: ScenarioOption[] = [
-  { id: 'portfolio_basics', name: 'Portfolio Basics' },
-  { id: 'macro_rotation', name: 'Macro Rotation' },
-  { id: 'risk_off_stress', name: 'Risk-Off Stress' },
+  { id: 'portfolio_basics', name: 'Portfolio Basics', description: 'Foundational multi-asset allocation and rebalancing.', durationMinutes: 45 },
+  { id: 'macro_rotation', name: 'Macro Rotation', description: 'Cross-asset shifts through changing macro regimes.', durationMinutes: 60 },
+  { id: 'risk_off_stress', name: 'Risk-Off Stress', description: 'Stress-test decisions under drawdown pressure.', durationMinutes: 30 },
 ];
 
 const simBaseUrl = (import.meta.env.VITE_PORTFOLIO_SIM_URL as string | undefined)?.replace(/\/$/, '') ?? '';
@@ -31,17 +32,28 @@ function normalizeState(state: string | null | undefined) {
   return normalized as 'draft' | 'active' | 'live' | 'paused' | 'ended';
 }
 
+function nextCodeSuggestion(events: AdminEvent[]) {
+  const used = new Set(events.map((event) => event.code.toUpperCase()));
+  for (let i = 1; i <= 99; i += 1) {
+    const candidate = `KENTINVEST${String(i).padStart(2, '0')}`;
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
+  return `KENTINVEST${Date.now().toString().slice(-2)}`;
+}
+
 function EventCard({
   event,
   onStateChange,
   onOpenAdmin,
-  onOpenPlayer,
+  onCopyCode,
   busy,
 }: {
   event: AdminEvent;
   onStateChange: (eventCode: string, state: 'draft' | 'active' | 'live' | 'paused' | 'ended') => Promise<void>;
   onOpenAdmin: (eventCode: string) => Promise<void>;
-  onOpenPlayer: (eventCode: string) => Promise<void>;
+  onCopyCode: (eventCode: string) => Promise<void>;
   busy: string | null;
 }) {
   const state = normalizeState(event.state);
@@ -59,7 +71,7 @@ function EventCard({
     <article className="rounded-2xl border border-white/10 bg-slate-950/60 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{event.code}</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Player code: {event.code}</p>
           <h3 className="mt-1 text-lg font-semibold text-slate-100">{event.name}</h3>
         </div>
         <span className={`rounded-full px-2 py-1 text-xs ${stateBadgeClass[state] ?? stateBadgeClass.draft}`}>
@@ -94,7 +106,7 @@ function EventCard({
           </>
         )}
         <button disabled={isBusy} onClick={() => void onOpenAdmin(event.code)} className="rounded-lg border border-mint/40 px-3 py-1.5 text-xs text-mint disabled:opacity-60">Open Sim Admin</button>
-        <button disabled={isBusy} onClick={() => void onOpenPlayer(event.code)} className="rounded-lg border border-white/20 px-3 py-1.5 text-xs text-slate-200 disabled:opacity-60">Open Player Link</button>
+        <button disabled={isBusy} onClick={() => void onCopyCode(event.code)} className="rounded-lg border border-white/20 px-3 py-1.5 text-xs text-slate-200 disabled:opacity-60">Copy Player Code</button>
       </div>
     </article>
   );
@@ -110,30 +122,29 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [showEnded, setShowEnded] = useState(false);
-  const [formErrors, setFormErrors] = useState<{ code?: string; name?: string }>({});
+  const [formErrors, setFormErrors] = useState<{ code?: string; name?: string; scenarioId?: string }>({});
   const [form, setForm] = useState({
-    code: '',
+    code: 'KENTINVEST01',
     name: '',
-    simType: 'portfolio',
     scenarioId: fallbackScenarios[0].id,
-    durationMinutes: 45,
+    durationMinutes: fallbackScenarios[0].durationMinutes ?? 45,
     state: 'active' as 'draft' | 'active',
   });
 
   const canLoad = !!accessToken && !!user && isAdmin;
 
   const loadEvents = async () => {
-    if (!accessToken) {
-      return;
-    }
-
+    if (!accessToken) return [];
     try {
       setLoading(true);
       setError(null);
       const response = await fetchAdminEvents(accessToken);
       setEvents(response.events);
+      setForm((current) => (current.code.trim() ? current : { ...current, code: nextCodeSuggestion(response.events) }));
+      return response.events;
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Failed to load admin events.');
+      return [];
     } finally {
       setLoading(false);
     }
@@ -144,34 +155,47 @@ export default function AdminPage() {
       setLoading(false);
       return;
     }
-
     void loadEvents();
   }, [canLoad]);
 
   useEffect(() => {
     const loadScenarios = async () => {
-      if (!simBaseUrl) {
-        return;
-      }
+      if (!simBaseUrl) return;
 
-      try {
-        const response = await fetch(`${simBaseUrl}/meta/scenarios`);
-        if (!response.ok) {
-          return;
+      const endpoints = [`${simBaseUrl}/meta/scenarios`, `${simBaseUrl}/meta/scenarios.json`];
+      for (const endpoint of endpoints) {
+        try {
+          const response = await fetch(endpoint);
+          if (!response.ok) continue;
+
+          const payload = (await response.json()) as {
+            scenarios?: Array<{ id?: string; scenario_id?: string; name?: string; title?: string; description?: string; duration_minutes?: number; duration?: number }>;
+          };
+
+          const rows = (payload.scenarios ?? [])
+            .map((scenario) => {
+              const id = scenario.id?.trim() || scenario.scenario_id?.trim() || '';
+              return {
+                id,
+                name: scenario.name?.trim() || scenario.title?.trim() || id,
+                description: scenario.description?.trim() || 'No description provided.',
+                durationMinutes: Number(scenario.duration_minutes ?? scenario.duration ?? 0) || null,
+              };
+            })
+            .filter((scenario) => scenario.id);
+
+          if (rows.length) {
+            setScenarios(rows);
+            setForm((current) => ({
+              ...current,
+              scenarioId: rows[0].id,
+              durationMinutes: rows[0].durationMinutes ?? current.durationMinutes,
+            }));
+            return;
+          }
+        } catch {
+          // try the next endpoint
         }
-
-        const payload = (await response.json()) as { scenarios?: Array<{ id?: string; name?: string }> };
-        const rows = payload.scenarios
-          ?.map((scenario) => ({ id: scenario.id?.trim() ?? '', name: scenario.name?.trim() ?? '' }))
-          .filter((scenario) => scenario.id)
-          .map((scenario) => ({ id: scenario.id, name: scenario.name || scenario.id }));
-
-        if (rows?.length) {
-          setScenarios(rows);
-          setForm((current) => ({ ...current, scenarioId: rows[0].id }));
-        }
-      } catch {
-        // keep fallback scenarios when sim meta endpoint is unavailable
       }
     };
 
@@ -186,16 +210,13 @@ export default function AdminPage() {
     return { drafts, active, running, ended };
   }, [events]);
 
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
+  if (!user) return <Navigate to="/login" replace />;
+  if (!adminLoading && !isAdmin) return <Navigate to="/" replace />;
 
-  if (!adminLoading && !isAdmin) {
-    return <Navigate to="/" replace />;
-  }
+  const selectedScenario = scenarios.find((scenario) => scenario.id === form.scenarioId) ?? null;
 
   const validateForm = () => {
-    const nextErrors: { code?: string; name?: string } = {};
+    const nextErrors: { code?: string; name?: string; scenarioId?: string } = {};
     const normalizedCode = form.code.trim().toUpperCase();
 
     if (!normalizedCode) {
@@ -210,34 +231,41 @@ export default function AdminPage() {
       nextErrors.name = 'Name is required.';
     }
 
+    if (!form.scenarioId.trim()) {
+      nextErrors.scenarioId = 'Scenario is required.';
+    }
+
     setFormErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
 
   const handleCreateEvent = async (event: FormEvent) => {
     event.preventDefault();
-    if (!accessToken || !validateForm()) {
-      return;
-    }
+    if (!accessToken || !validateForm()) return;
 
     try {
       setFormLoading(true);
       setError(null);
+      const eventCode = form.code.trim().toUpperCase();
       await createAdminEvent(
         {
-          code: form.code.trim().toUpperCase(),
+          code: eventCode,
           name: form.name.trim(),
-          simType: form.simType,
-          scenarioId: form.scenarioId,
-          durationMinutes: Number(form.durationMinutes),
+          sim_type: 'portfolio',
+          sim_url: simBaseUrl,
+          scenario_id: form.scenarioId,
+          duration_minutes: Number(form.durationMinutes),
           state: form.state,
-          simUrl: simBaseUrl,
         },
         accessToken,
       );
-      setToast(`Event ${form.code.trim().toUpperCase()} created.`);
-      setForm((current) => ({ ...current, code: '', name: '' }));
-      await loadEvents();
+      setToast(`Event ${eventCode} created.`);
+      const latestEvents = await loadEvents();
+      setForm((current) => ({
+        ...current,
+        code: nextCodeSuggestion(latestEvents),
+        name: '',
+      }));
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : 'Failed to create event.');
     } finally {
@@ -247,10 +275,7 @@ export default function AdminPage() {
   };
 
   const handleStateChange = async (eventCode: string, state: 'draft' | 'active' | 'live' | 'paused' | 'ended') => {
-    if (!accessToken) {
-      return;
-    }
-
+    if (!accessToken) return;
     try {
       setActionBusyCode(eventCode);
       setError(null);
@@ -264,10 +289,7 @@ export default function AdminPage() {
   };
 
   const handleOpenSimAdmin = async (eventCode: string) => {
-    if (!accessToken) {
-      return;
-    }
-
+    if (!accessToken) return;
     try {
       setActionBusyCode(eventCode);
       setError(null);
@@ -280,20 +302,14 @@ export default function AdminPage() {
     }
   };
 
-  const handleOpenPlayerLink = async (eventCode: string) => {
-    if (!accessToken || !user) {
-      return;
-    }
-
+  const handleCopyCode = async (eventCode: string) => {
     try {
-      setActionBusyCode(eventCode);
-      setError(null);
-      const response = await createRunByCode(eventCode, user.id, accessToken);
-      window.open(response.simUrl, '_blank', 'noopener,noreferrer');
-    } catch (runError) {
-      setError(runError instanceof Error ? runError.message : 'Could not create player run link.');
-    } finally {
-      setActionBusyCode(null);
+      await navigator.clipboard.writeText(eventCode);
+      setToast(`Copied ${eventCode}`);
+      window.setTimeout(() => setToast(null), 2200);
+    } catch {
+      setToast(`Code: ${eventCode}`);
+      window.setTimeout(() => setToast(null), 2200);
     }
   };
 
@@ -308,7 +324,8 @@ export default function AdminPage() {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_1.3fr]">
         <article className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
-          <h2 className="text-lg font-semibold">Create new event</h2>
+          <h2 className="text-lg font-semibold">Create Event</h2>
+          <p className="mt-2 text-sm text-slate-300">Available scenarios are fetched from Portfolio Sim metadata.</p>
           <form className="mt-4 space-y-3" onSubmit={handleCreateEvent}>
             <div>
               <input
@@ -338,27 +355,34 @@ export default function AdminPage() {
               {formErrors.name && <p className="mt-1 text-xs text-rose-300">{formErrors.name}</p>}
             </div>
             <label className="block text-sm text-slate-300">
-              Sim type
-              <select
-                value={form.simType}
-                onChange={(event) => setForm((current) => ({ ...current, simType: event.target.value }))}
-                className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5"
-              >
-                <option value="portfolio">Portfolio</option>
-              </select>
-            </label>
-            <label className="block text-sm text-slate-300">
-              Scenario
+              Available scenarios
               <select
                 value={form.scenarioId}
-                onChange={(event) => setForm((current) => ({ ...current, scenarioId: event.target.value }))}
+                onChange={(event) => {
+                  const nextScenario = scenarios.find((scenario) => scenario.id === event.target.value);
+                  setForm((current) => ({
+                    ...current,
+                    scenarioId: event.target.value,
+                    durationMinutes: nextScenario?.durationMinutes ?? current.durationMinutes,
+                  }));
+                  setFormErrors((current) => ({ ...current, scenarioId: undefined }));
+                }}
                 className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5"
+                required
               >
                 {scenarios.map((scenario) => (
-                  <option key={scenario.id} value={scenario.id}>{`${scenario.name} (${scenario.id})`}</option>
+                  <option key={scenario.id} value={scenario.id}>{scenario.name}</option>
                 ))}
               </select>
+              {formErrors.scenarioId && <p className="mt-1 text-xs text-rose-300">{formErrors.scenarioId}</p>}
             </label>
+            {selectedScenario && (
+              <div className="rounded-xl border border-white/10 bg-slate-950/70 p-3 text-sm text-slate-300">
+                <p className="font-medium text-slate-100">{selectedScenario.name}</p>
+                <p className="mt-1">{selectedScenario.description}</p>
+                <p className="mt-1 text-xs uppercase tracking-[0.15em] text-slate-400">Duration: {selectedScenario.durationMinutes ?? form.durationMinutes} minutes</p>
+              </div>
+            )}
             <label className="block text-sm text-slate-300">
               Duration (minutes)
               <input
@@ -370,19 +394,8 @@ export default function AdminPage() {
                 required
               />
             </label>
-            <label className="block text-sm text-slate-300">
-              Status
-              <select
-                value={form.state}
-                onChange={(event) => setForm((current) => ({ ...current, state: event.target.value as 'draft' | 'active' }))}
-                className="mt-1 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5"
-              >
-                <option value="draft">draft</option>
-                <option value="active">active</option>
-              </select>
-            </label>
             <button disabled={formLoading} className="w-full rounded-xl2 bg-mint px-5 py-2.5 text-sm font-semibold text-slate-900 disabled:opacity-60">
-              {formLoading ? 'Creating…' : 'Create event'}
+              {formLoading ? 'Creating…' : 'Create Event'}
             </button>
           </form>
           {toast && <p className="mt-3 text-sm text-mint">{toast}</p>}
@@ -390,7 +403,7 @@ export default function AdminPage() {
         </article>
 
         <article className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
-          <h2 className="text-lg font-semibold">Events</h2>
+          <h2 className="text-lg font-semibold">Events (all states)</h2>
           {loading ? (
             <p className="mt-3 text-sm text-slate-300">Loading events…</p>
           ) : (
@@ -399,7 +412,7 @@ export default function AdminPage() {
                 <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">Draft events</h3>
                 <div className="mt-3 space-y-3">
                   {grouped.drafts.map((event) => (
-                    <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onOpenPlayer={handleOpenPlayerLink} busy={actionBusyCode} />
+                    <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onCopyCode={handleCopyCode} busy={actionBusyCode} />
                   ))}
                   {!grouped.drafts.length && <p className="text-sm text-slate-400">No draft events.</p>}
                 </div>
@@ -409,7 +422,7 @@ export default function AdminPage() {
                 <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">Active events</h3>
                 <div className="mt-3 space-y-3">
                   {grouped.active.map((event) => (
-                    <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onOpenPlayer={handleOpenPlayerLink} busy={actionBusyCode} />
+                    <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onCopyCode={handleCopyCode} busy={actionBusyCode} />
                   ))}
                   {!grouped.active.length && <p className="text-sm text-slate-400">No active events.</p>}
                 </div>
@@ -419,7 +432,7 @@ export default function AdminPage() {
                 <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">Live / running events</h3>
                 <div className="mt-3 space-y-3">
                   {grouped.running.map((event) => (
-                    <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onOpenPlayer={handleOpenPlayerLink} busy={actionBusyCode} />
+                    <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onCopyCode={handleCopyCode} busy={actionBusyCode} />
                   ))}
                   {!grouped.running.length && <p className="text-sm text-slate-400">No running events.</p>}
                 </div>
@@ -432,7 +445,7 @@ export default function AdminPage() {
                 {showEnded && (
                   <div className="mt-3 space-y-3">
                     {grouped.ended.map((event) => (
-                      <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onOpenPlayer={handleOpenPlayerLink} busy={actionBusyCode} />
+                      <EventCard key={event.id} event={event} onStateChange={handleStateChange} onOpenAdmin={handleOpenSimAdmin} onCopyCode={handleCopyCode} busy={actionBusyCode} />
                     ))}
                     {!grouped.ended.length && <p className="text-sm text-slate-400">No ended events.</p>}
                   </div>
