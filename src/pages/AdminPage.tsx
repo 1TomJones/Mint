@@ -224,8 +224,8 @@ export default function AdminPage() {
 
       await createAdminEvent(
         {
-          event_code: eventCode,
-          event_name: form.name.trim(),
+          code: eventCode,
+          name: form.name.trim(),
           scenario_id: form.scenarioId,
           duration_minutes: Number(form.durationMinutes),
           sim_url: form.simUrl.trim(),

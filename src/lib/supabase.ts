@@ -10,6 +10,8 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 interface SupabaseError {
   message?: string;
+  detail?: string;
+  hint?: string;
   error_description?: string;
   msg?: string;
 }
@@ -80,7 +82,7 @@ async function supabaseRequest<T>(path: string, options: RequestOptions = {}) {
 
   if (!response.ok) {
     const errorData: SupabaseError = await response.json().catch(() => ({}));
-    throw new Error(errorData.error_description ?? errorData.message ?? errorData.msg ?? 'Supabase request failed.');
+    throw new Error(errorData.detail ?? errorData.message ?? errorData.error_description ?? errorData.hint ?? errorData.msg ?? 'Supabase request failed.');
   }
 
   if (response.status === 204) {
