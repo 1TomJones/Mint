@@ -152,7 +152,7 @@ interface CreateRunApiResponse {
 export async function createRunByCode(eventCode: string, userId: string, accessToken?: string) {
   const response = await backendRequest<CreateRunApiResponse>('/api/runs/create', {
     method: 'POST',
-    body: { event_code: eventCode },
+    body: { eventCode },
     accessToken,
     userId,
     requireAuth: true,
@@ -319,6 +319,13 @@ export function updateAdminEventState(eventCode: string, state: 'draft' | 'activ
   return backendRequest<{ event: AdminEvent }>(`/api/admin/events/${encodeURIComponent(eventCode)}/state`, {
     method: 'POST',
     body: { state },
+    accessToken,
+  });
+}
+
+
+export function fetchAdminSimLink(eventCode: string, accessToken: string) {
+  return backendRequest<{ adminUrl: string }>(`/api/admin/events/${encodeURIComponent(eventCode)}/sim-admin-link`, {
     accessToken,
   });
 }

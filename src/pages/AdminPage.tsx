@@ -5,6 +5,7 @@ import {
   fetchAdminEvents,
   fetchPortfolioScenarioMetadata,
   updateAdminEventState,
+  fetchAdminSimLink,
   type AdminEvent,
   type ScenarioMetadata,
 } from '../lib/backendApi';
@@ -51,7 +52,7 @@ function EventCard({
 }: {
   event: AdminEvent;
   onStateChange: (eventCode: string, state: 'draft' | 'active' | 'live' | 'paused' | 'ended') => Promise<void>;
-  onJoinAsAdmin: (event: AdminEvent) => void;
+  onJoinAsAdmin: (event: AdminEvent) => Promise<void>;
   onCopyCode: (eventCode: string) => Promise<void>;
   busy: string | null;
 }) {
@@ -104,7 +105,7 @@ function EventCard({
             <button disabled={isBusy} onClick={() => void onStateChange(event.code, 'ended')} className="rounded-lg border border-rose-400/40 px-3 py-1.5 text-xs text-rose-300 disabled:opacity-60">End</button>
           </>
         )}
-        <button disabled={isBusy} onClick={() => onJoinAsAdmin(event)} className="rounded-lg border border-mint/40 px-3 py-1.5 text-xs text-mint disabled:opacity-60">Admin Join</button>
+        <button disabled={isBusy} onClick={() => void onJoinAsAdmin(event)} className="rounded-lg border border-mint/40 px-3 py-1.5 text-xs text-mint disabled:opacity-60">Admin Join</button>
         <button disabled={isBusy} onClick={() => void onCopyCode(event.code)} className="rounded-lg border border-white/20 px-3 py-1.5 text-xs text-slate-200 disabled:opacity-60">Copy Player Code</button>
       </div>
     </article>
@@ -275,16 +276,22 @@ export default function AdminPage() {
     }
   };
 
-  const handleJoinAsAdmin = (event: AdminEvent) => {
+  const handleJoinAsAdmin = async (event: AdminEvent) => {
+    if (!accessToken) {
+      setError('Please sign in first.');
+      return;
+    }
+
     try {
-      const scenario = scenarios.find((item) => item.id === event.scenario_id);
-      const adminPath = scenario?.admin_path || '/admin.html';
-      const adminPathNormalized = adminPath.startsWith('/') ? adminPath : `/${adminPath}`;
-      const adminUrl = `${event.sim_url.replace(/\/$/, '')}${adminPathNormalized}?event_code=${encodeURIComponent(event.code)}&role=admin`;
-      window.open(adminUrl, '_blank', 'noopener,noreferrer');
+      setActionBusyCode(event.code);
+      setError(null);
+      const response = await fetchAdminSimLink(event.code, accessToken);
+      window.open(response.adminUrl, '_blank', 'noopener,noreferrer');
     } catch (openError) {
       console.error('[AdminPage] failed to open admin URL', openError);
-      setError('Could not open admin URL. (HTTP 0)');
+      setError(toAdminErrorMessage(openError, 'Could not open admin URL.'));
+    } finally {
+      setActionBusyCode(null);
     }
   };
 
