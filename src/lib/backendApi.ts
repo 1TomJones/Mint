@@ -262,7 +262,7 @@ export function fetchAdminStatus(accessToken: string) {
 }
 
 export function fetchAdminEvents(accessToken: string) {
-  return backendRequest<{ events: AdminEvent[] }>('/api/events/public', { accessToken });
+  return backendRequest<{ events: AdminEvent[] }>('/api/events', { accessToken, requireAuth: true });
 }
 
 export interface CreateAdminEventInput {
@@ -299,15 +299,38 @@ export interface PublicEvent {
 }
 
 export function fetchPublicEvents() {
-  return backendRequest<{ events: PublicEvent[] }>('/api/events/public', {
+  return backendRequest<{ events: PublicEvent[] }>('/api/events/active', {
     requireAuth: false,
   });
 }
 
-export function updateAdminEventState(eventCode: string, state: 'draft' | 'active' | 'live' | 'paused' | 'ended', accessToken: string) {
-  return backendRequest<{ event: AdminEvent }>(`/api/admin/events/${encodeURIComponent(eventCode)}/state`, {
-    method: 'POST',
-    body: { state },
+export function updateAdminEventStatus(eventId: string, status: 'draft' | 'active' | 'live' | 'paused' | 'ended', accessToken: string) {
+  return backendRequest<{ event: AdminEvent }>(`/api/events/${encodeURIComponent(eventId)}/status`, {
+    method: 'PATCH',
+    body: { status },
     accessToken,
+    requireAuth: true,
   });
+}
+
+export async function joinEventByCode(eventCode: string, userId: string, accessToken?: string) {
+  const response = await backendRequest<CreateRunApiResponse>('/api/events/join-by-code', {
+    method: 'POST',
+    body: { event_code: eventCode },
+    accessToken,
+    userId,
+    requireAuth: true,
+  });
+
+  const runId = response.runId ?? response.run_id;
+  const launchUrl = response.launchUrl ?? response.launch_url ?? response.simUrl ?? response.sim_url;
+
+  if (!launchUrl) {
+    throw new Error('Backend response missing sim_url.');
+  }
+
+  return {
+    runId: runId ?? null,
+    launchUrl,
+  } satisfies CreateRunResponse;
 }

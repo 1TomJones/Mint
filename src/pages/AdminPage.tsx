@@ -4,7 +4,7 @@ import {
   createAdminEvent,
   fetchAdminEvents,
   fetchPortfolioScenarioMetadata,
-  updateAdminEventState,
+  updateAdminEventStatus,
   type AdminEvent,
   type ScenarioMetadata,
 } from '../lib/backendApi';
@@ -50,7 +50,7 @@ function EventCard({
   busy,
 }: {
   event: AdminEvent;
-  onStateChange: (eventCode: string, state: 'draft' | 'active' | 'live' | 'paused' | 'ended') => Promise<void>;
+  onStateChange: (eventId: string, state: 'draft' | 'active' | 'live' | 'paused' | 'ended') => Promise<void>;
   onJoinAsAdmin: (event: AdminEvent) => void;
   onCopyCode: (eventCode: string) => Promise<void>;
   busy: string | null;
@@ -87,21 +87,21 @@ function EventCard({
 
       <div className="mt-4 flex flex-wrap gap-2">
         {state === 'draft' && (
-          <button disabled={isBusy} onClick={() => void onStateChange(event.code, 'active')} className="rounded-lg border border-mint/40 px-3 py-1.5 text-xs text-mint disabled:opacity-60">Activate</button>
+          <button disabled={isBusy} onClick={() => void onStateChange(event.id, 'active')} className="rounded-lg border border-mint/40 px-3 py-1.5 text-xs text-mint disabled:opacity-60">Activate / Publish</button>
         )}
         {state === 'active' && (
-          <button disabled={isBusy} onClick={() => void onStateChange(event.code, 'live')} className="rounded-lg border border-emerald-400/40 px-3 py-1.5 text-xs text-emerald-300 disabled:opacity-60">Start</button>
+          <button disabled={isBusy} onClick={() => void onStateChange(event.id, 'live')} className="rounded-lg border border-emerald-400/40 px-3 py-1.5 text-xs text-emerald-300 disabled:opacity-60">Start</button>
         )}
         {state === 'live' && (
           <>
-            <button disabled={isBusy} onClick={() => void onStateChange(event.code, 'paused')} className="rounded-lg border border-amber-400/40 px-3 py-1.5 text-xs text-amber-200 disabled:opacity-60">Pause</button>
-            <button disabled={isBusy} onClick={() => void onStateChange(event.code, 'ended')} className="rounded-lg border border-rose-400/40 px-3 py-1.5 text-xs text-rose-300 disabled:opacity-60">End</button>
+            <button disabled={isBusy} onClick={() => void onStateChange(event.id, 'paused')} className="rounded-lg border border-amber-400/40 px-3 py-1.5 text-xs text-amber-200 disabled:opacity-60">Pause</button>
+            <button disabled={isBusy} onClick={() => void onStateChange(event.id, 'ended')} className="rounded-lg border border-rose-400/40 px-3 py-1.5 text-xs text-rose-300 disabled:opacity-60">End</button>
           </>
         )}
         {state === 'paused' && (
           <>
-            <button disabled={isBusy} onClick={() => void onStateChange(event.code, 'live')} className="rounded-lg border border-emerald-400/40 px-3 py-1.5 text-xs text-emerald-300 disabled:opacity-60">Resume</button>
-            <button disabled={isBusy} onClick={() => void onStateChange(event.code, 'ended')} className="rounded-lg border border-rose-400/40 px-3 py-1.5 text-xs text-rose-300 disabled:opacity-60">End</button>
+            <button disabled={isBusy} onClick={() => void onStateChange(event.id, 'live')} className="rounded-lg border border-emerald-400/40 px-3 py-1.5 text-xs text-emerald-300 disabled:opacity-60">Resume</button>
+            <button disabled={isBusy} onClick={() => void onStateChange(event.id, 'ended')} className="rounded-lg border border-rose-400/40 px-3 py-1.5 text-xs text-rose-300 disabled:opacity-60">End</button>
           </>
         )}
         <button disabled={isBusy} onClick={() => onJoinAsAdmin(event)} className="rounded-lg border border-mint/40 px-3 py-1.5 text-xs text-mint disabled:opacity-60">Admin Join</button>
@@ -260,12 +260,13 @@ export default function AdminPage() {
     }
   };
 
-  const handleStateChange = async (eventCode: string, state: 'draft' | 'active' | 'live' | 'paused' | 'ended') => {
+  const handleStateChange = async (eventId: string, state: 'draft' | 'active' | 'live' | 'paused' | 'ended') => {
     if (!accessToken) return;
     try {
-      setActionBusyCode(eventCode);
+      const busyEvent = events.find((event) => event.id === eventId);
+      setActionBusyCode(busyEvent?.code ?? eventId);
       setError(null);
-      await updateAdminEventState(eventCode, state, accessToken);
+      await updateAdminEventStatus(eventId, state, accessToken);
       await loadEvents();
     } catch (changeError) {
       console.error('[AdminPage] state update failed', changeError);
