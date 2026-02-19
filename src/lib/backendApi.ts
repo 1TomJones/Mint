@@ -270,7 +270,7 @@ export async function fetchAdminStatus(accessToken: string) {
 }
 
 export function fetchAdminEvents(accessToken: string) {
-  return backendRequest<{ events: AdminEvent[] }>('/api/events/public', { accessToken });
+  return backendRequest<{ events: AdminEvent[] }>('/api/admin/events', { accessToken });
 }
 
 export interface CreateAdminEventInput {
@@ -283,9 +283,12 @@ export interface CreateAdminEventInput {
 }
 
 export function createAdminEvent(payload: CreateAdminEventInput, accessToken: string, userId: string) {
-  return backendRequest<{ event: AdminEvent }>('/api/events/create', {
+  return backendRequest<{ event: AdminEvent }>('/api/admin/events', {
     method: 'POST',
-    body: payload,
+    body: {
+      ...payload,
+      state: 'draft',
+    },
     accessToken,
     userId,
     requireAuth: true,
