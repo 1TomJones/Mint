@@ -6,7 +6,6 @@ export const appEnv = {
   supabaseAnonKey: readEnv(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined),
   portfolioSimUrl: readEnv(import.meta.env.VITE_PORTFOLIO_SIM_URL as string | undefined),
   portfolioSimMetadataUrl: readEnv(import.meta.env.VITE_PORTFOLIO_SIM_METADATA_URL as string | undefined),
-  adminAllowlistEmails: readEnv(import.meta.env.VITE_ADMIN_ALLOWLIST_EMAILS as string | undefined),
 };
 
 export const requiredEnvChecks = [
@@ -15,7 +14,6 @@ export const requiredEnvChecks = [
   { key: 'VITE_SUPABASE_ANON_KEY', present: appEnv.supabaseAnonKey.length > 0 },
   { key: 'VITE_PORTFOLIO_SIM_URL', present: appEnv.portfolioSimUrl.length > 0 },
   { key: 'VITE_PORTFOLIO_SIM_METADATA_URL', present: appEnv.portfolioSimMetadataUrl.length > 0 },
-  { key: 'VITE_ADMIN_ALLOWLIST_EMAILS', present: appEnv.adminAllowlistEmails.length > 0 },
 ] as const;
 
 export function getMissingEnvVars() {

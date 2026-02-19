@@ -120,6 +120,24 @@ class SupabaseQueryBuilder<T> implements PromiseLike<QueryResult<T[]>> {
     return this;
   }
 
+  ilike(column: string, value: string) {
+    this.params.set(column, `ilike.${value}`);
+    return this;
+  }
+
+  async maybeSingle(): Promise<QueryResult<T>> {
+    this.params.set('limit', '1');
+
+    try {
+      const accessToken = await getFreshAccessToken();
+      const path = `/rest/v1/${this.table}?${this.params.toString()}`;
+      const data = await supabaseRequest<T[]>(path, { accessToken });
+      return { data: data?.[0] ?? null, error: null };
+    } catch (error) {
+      return { data: null, error: error as Error };
+    }
+  }
+
   order(column: string, options?: { ascending?: boolean }) {
     const direction = options?.ascending === false ? 'desc' : 'asc';
     this.params.set('order', `${column}.${direction}`);

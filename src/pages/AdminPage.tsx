@@ -31,6 +31,17 @@ function nextCodeSuggestion(events: AdminEvent[]) {
   return `KENTINVEST${Date.now().toString().slice(-2)}`;
 }
 
+
+function toAdminErrorMessage(error: unknown, fallback: string) {
+  const baseMessage = error instanceof Error ? error.message : fallback;
+  const normalized = baseMessage.toLowerCase();
+  if (normalized.includes('forbidden') && normalized.includes('email not in admin_allowlist')) {
+    return 'Access denied: your email is not in admin_allowlist. Request access from an administrator and try again.';
+  }
+
+  return baseMessage;
+}
+
 function EventCard({
   event,
   onStateChange,
@@ -134,7 +145,7 @@ export default function AdminPage() {
       return response.events;
     } catch (loadError) {
       console.error('[AdminPage] Failed to load admin events', loadError);
-      setError(loadError instanceof Error ? loadError.message : 'Failed to load admin events.');
+      setError(toAdminErrorMessage(loadError, 'Failed to load admin events.'));
       return [];
     } finally {
       setLoading(false);
@@ -242,7 +253,7 @@ export default function AdminPage() {
       }));
     } catch (createError) {
       console.error('[AdminPage] create event failed', createError);
-      setError(createError instanceof Error ? createError.message : 'Failed to create event.');
+      setError(toAdminErrorMessage(createError, 'Failed to create event.'));
     } finally {
       setFormLoading(false);
       window.setTimeout(() => setToast(null), 3200);
@@ -258,7 +269,7 @@ export default function AdminPage() {
       await loadEvents();
     } catch (changeError) {
       console.error('[AdminPage] state update failed', changeError);
-      setError(changeError instanceof Error ? changeError.message : 'Failed to update event state.');
+      setError(toAdminErrorMessage(changeError, 'Failed to update event state.'));
     } finally {
       setActionBusyCode(null);
     }
@@ -306,7 +317,6 @@ export default function AdminPage() {
           <div><dt className="text-slate-400">VITE_SUPABASE_ANON_KEY</dt><dd>{String(Boolean(appEnv.supabaseAnonKey))}</dd></div>
           <div><dt className="text-slate-400">VITE_PORTFOLIO_SIM_URL</dt><dd>{String(Boolean(appEnv.portfolioSimUrl))}</dd></div>
           <div><dt className="text-slate-400">VITE_PORTFOLIO_SIM_METADATA_URL</dt><dd>{String(Boolean(appEnv.portfolioSimMetadataUrl))}</dd></div>
-          <div><dt className="text-slate-400">VITE_ADMIN_ALLOWLIST_EMAILS</dt><dd>{String(Boolean(appEnv.adminAllowlistEmails))}</dd></div>
         </dl>
       </article>
 

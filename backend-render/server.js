@@ -6,11 +6,6 @@ import { createClient } from '@supabase/supabase-js';
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
 const simAdminToken = process.env.SIM_ADMIN_TOKEN ?? '';
-const adminAllowlist = (process.env.ADMIN_ALLOWLIST_EMAILS ?? '')
-  .split(',')
-  .map((email) => email.trim().toLowerCase())
-  .filter(Boolean);
-
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -54,38 +49,39 @@ async function getAuthenticatedUser(req) {
   return data.user ?? null;
 }
 
-async function isAdminUser(req) {
+async function getAdminStatus(req) {
   const user = await getAuthenticatedUser(req);
   if (!user) {
-    return false;
+    return { allowed: false, detail: 'not authenticated' };
   }
 
-  const email = user.email?.toLowerCase() ?? '';
-  if (email && adminAllowlist.includes(email)) {
-    return true;
+  const email = user.email?.trim().toLowerCase() ?? '';
+  if (!email) {
+    return { allowed: false, detail: 'email missing from auth user' };
   }
 
-  const { data: profile, error } = await supabase
-    .from('profiles')
-    .select('is_admin')
-    .eq('id', user.id)
+  const { data, error } = await supabase
+    .from('admin_allowlist')
+    .select('email')
+    .ilike('email', email)
     .maybeSingle();
 
   if (error) {
-    if (error.code === 'PGRST116' || /relation .*profiles/i.test(error.message ?? '')) {
-      return false;
-    }
     throw error;
   }
 
-  return Boolean(profile?.is_admin);
+  if (!data) {
+    return { allowed: false, detail: 'email not in admin_allowlist' };
+  }
+
+  return { allowed: true, detail: null };
 }
 
 async function requireAdmin(req, res) {
   try {
-    const isAdmin = await isAdminUser(req);
-    if (!isAdmin) {
-      res.status(403).json({ error: 'Admin access required' });
+    const { allowed, detail } = await getAdminStatus(req);
+    if (!allowed) {
+      res.status(403).json({ error: 'forbidden', detail });
       return false;
     }
 
@@ -119,8 +115,8 @@ app.get('/health', (_req, res) => {
 
 app.get('/api/admin/me', async (req, res) => {
   try {
-    const isAdmin = await isAdminUser(req);
-    return res.json({ isAdmin });
+    const { allowed, detail } = await getAdminStatus(req);
+    return res.json({ isAdmin: allowed, detail: allowed ? null : detail });
   } catch (error) {
     return res.status(401).json({ error: error instanceof Error ? error.message : 'Invalid authorization' });
   }

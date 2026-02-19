@@ -6,7 +6,6 @@ interface ImportMetaEnv {
   readonly VITE_SUPABASE_ANON_KEY: string;
   readonly VITE_PORTFOLIO_SIM_URL: string;
   readonly VITE_PORTFOLIO_SIM_METADATA_URL: string;
-  readonly VITE_ADMIN_ALLOWLIST_EMAILS: string;
 }
 
 interface ImportMeta {
