@@ -27,33 +27,13 @@ function toAuthUser(user: AuthUser | null): AuthUser | null {
   };
 }
 
-async function lookupAdminAllowlist(accessToken?: string | null, email?: string) {
+async function lookupAdminAllowlist(accessToken?: string | null) {
   if (!accessToken) {
     return false;
   }
 
-  try {
-    const response = await fetchAdminStatus(accessToken);
-    return Boolean(response.isAdmin);
-  } catch (backendError) {
-    const normalizedEmail = email?.trim().toLowerCase();
-    if (!normalizedEmail) {
-      throw backendError;
-    }
-
-    const { data, error } = await supabase
-      .from<{ email: string }>('admin_allowlist')
-      .select('email')
-      .eq('email', normalizedEmail)
-      .maybeSingle();
-
-    if (error) {
-      throw backendError;
-    }
-
-    console.warn('[auth] backend admin endpoint failed; fallback allowlist check was used', backendError);
-    return !!data;
-  }
+  const response = await fetchAdminStatus(accessToken);
+  return Boolean(response.isAdmin);
 }
 
 export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
@@ -113,10 +93,10 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 
       try {
         setAdminLoading(true);
-        const adminAllowed = await lookupAdminAllowlist(accessToken, user.email);
+        const adminAllowed = await lookupAdminAllowlist(accessToken);
         setIsAdmin(adminAllowed);
       } catch (error) {
-        console.error('[auth] failed to resolve admin status', error);
+        console.error('[auth] failed to resolve admin status from backend', error);
         setIsAdmin(false);
       } finally {
         setAdminLoading(false);

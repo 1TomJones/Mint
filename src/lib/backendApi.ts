@@ -286,11 +286,7 @@ export function createAdminEvent(payload: CreateAdminEventInput, accessToken: st
   return backendRequest<{ event: AdminEvent }>('/api/admin/events', {
     method: 'POST',
     body: {
-      code: payload.code,
-      name: payload.name,
-      scenarioId: payload.scenario_id,
-      durationMinutes: payload.duration_minutes,
-      simUrl: payload.sim_url,
+      ...payload,
       state: 'draft',
     },
     accessToken,
