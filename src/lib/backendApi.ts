@@ -257,12 +257,20 @@ export interface AdminEvent {
   ended_at?: string | null;
 }
 
-export function fetchAdminStatus(accessToken: string) {
-  return backendRequest<{ isAdmin: boolean }>('/api/admin/me', { accessToken });
+export async function fetchAdminStatus(accessToken: string) {
+  try {
+    return await backendRequest<{ isAdmin: boolean }>('/api/admin/me', { accessToken });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Backend route not deployed')) {
+      return backendRequest<{ isAdmin: boolean }>('/admin/me', { accessToken });
+    }
+
+    throw error;
+  }
 }
 
 export function fetchAdminEvents(accessToken: string) {
-  return backendRequest<{ events: AdminEvent[] }>('/api/events/public', { accessToken });
+  return backendRequest<{ events: AdminEvent[] }>('/api/admin/events', { accessToken });
 }
 
 export interface CreateAdminEventInput {
@@ -275,9 +283,12 @@ export interface CreateAdminEventInput {
 }
 
 export function createAdminEvent(payload: CreateAdminEventInput, accessToken: string, userId: string) {
-  return backendRequest<{ event: AdminEvent }>('/api/events/create', {
+  return backendRequest<{ event: AdminEvent }>('/api/admin/events', {
     method: 'POST',
-    body: payload,
+    body: {
+      ...payload,
+      state: 'draft',
+    },
     accessToken,
     userId,
     requireAuth: true,

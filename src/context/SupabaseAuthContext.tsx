@@ -1,5 +1,6 @@
 import { ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { AuthUser, Session, supabase } from '../lib/supabase';
+import { fetchAdminStatus } from '../lib/backendApi';
 
 interface SupabaseAuthContextValue {
   user: AuthUser | null;
@@ -26,23 +27,33 @@ function toAuthUser(user: AuthUser | null): AuthUser | null {
   };
 }
 
-async function lookupAdminAllowlist(email?: string) {
-  const normalizedEmail = email?.trim().toLowerCase();
-  if (!normalizedEmail) {
+async function lookupAdminAllowlist(accessToken?: string | null, email?: string) {
+  if (!accessToken) {
     return false;
   }
 
-  const { data, error } = await supabase
-    .from<{ email: string }>('admin_allowlist')
-    .select('email')
-    .ilike('email', normalizedEmail)
-    .maybeSingle();
+  try {
+    const response = await fetchAdminStatus(accessToken);
+    return Boolean(response.isAdmin);
+  } catch (backendError) {
+    const normalizedEmail = email?.trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw backendError;
+    }
 
-  if (error) {
-    throw error;
+    const { data, error } = await supabase
+      .from<{ email: string }>('admin_allowlist')
+      .select('email')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+
+    if (error) {
+      throw backendError;
+    }
+
+    console.warn('[auth] backend admin endpoint failed; fallback allowlist check was used', backendError);
+    return !!data;
   }
-
-  return !!data;
 }
 
 export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
@@ -102,10 +113,10 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 
       try {
         setAdminLoading(true);
-        const adminAllowed = await lookupAdminAllowlist(user.email);
+        const adminAllowed = await lookupAdminAllowlist(accessToken, user.email);
         setIsAdmin(adminAllowed);
       } catch (error) {
-        console.error('[auth] failed to resolve admin status from admin_allowlist', error);
+        console.error('[auth] failed to resolve admin status', error);
         setIsAdmin(false);
       } finally {
         setAdminLoading(false);
