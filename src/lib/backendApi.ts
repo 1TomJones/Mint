@@ -299,7 +299,7 @@ export interface PublicEvent {
 }
 
 export function fetchPublicEvents() {
-  return backendRequest<{ events: PublicEvent[] }>('/events?status=active', {
+  return backendRequest<{ events: PublicEvent[] }>('/api/events/active', {
     requireAuth: false,
   });
 }

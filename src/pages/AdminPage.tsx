@@ -112,7 +112,7 @@ function EventCard({
 }
 
 export default function AdminPage() {
-  const { user, accessToken, isAdmin, adminLoading, adminError } = useSupabaseAuth();
+  const { user, accessToken, isAdmin, adminLoading } = useSupabaseAuth();
   const [events, setEvents] = useState<AdminEvent[]>([]);
   const [scenarios, setScenarios] = useState<ScenarioMetadata[]>([]);
   const [loading, setLoading] = useState(true);
@@ -132,7 +132,7 @@ export default function AdminPage() {
     simUrl: appEnv.portfolioSimUrl,
   });
 
-  const canLoad = !!accessToken && !!user && isAdmin && !adminError;
+  const canLoad = !!accessToken && !!user && isAdmin;
 
   const loadEvents = async () => {
     if (!accessToken) return [];
@@ -195,7 +195,7 @@ export default function AdminPage() {
   }, [events]);
 
   if (!user) return <Navigate to="/login" replace />;
-  if (!adminLoading && !isAdmin && !adminError) return <Navigate to="/" replace />;
+  if (!adminLoading && !isAdmin) return <Navigate to="/" replace />;
 
   const selectedScenario = scenarios.find((scenario) => scenario.id === form.scenarioId) ?? null;
 
@@ -302,13 +302,6 @@ export default function AdminPage() {
 
   return (
     <section className="container-wide py-14">
-      {adminError && (
-        <div className="mb-6 rounded-xl border border-rose-300/30 bg-rose-900/20 p-4 text-sm text-rose-100">
-          <p className="font-semibold">Unable to verify admin status (allowlist lookup failed)</p>
-          <p className="mt-1 break-words text-rose-200">{adminError}</p>
-        </div>
-      )}
-
       <header className="mb-8 flex items-end justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Admin</p>

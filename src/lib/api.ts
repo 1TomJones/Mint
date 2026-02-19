@@ -13,10 +13,6 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}) {
     throw new Error('Missing VITE_BACKEND_URL environment variable.');
   }
 
-  const baseUrl = appEnv.backendUrl.replace(/\/+$/, '');
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  const apiPath = normalizedPath.startsWith('/api/') ? normalizedPath : `/api${normalizedPath}`;
-
   const headers = new Headers(options.headers);
   const hasAuthorizationHeader = headers.has('Authorization');
   const hasUserIdHeader = headers.has('x-user-id');
@@ -32,7 +28,7 @@ export async function apiFetch(path: string, options: ApiFetchOptions = {}) {
 
   const { method, body, requireAuth: _ignoredRequireAuth, ...requestInit } = options;
 
-  return fetch(`${baseUrl}${apiPath}`, {
+  return fetch(`${appEnv.backendUrl}${path}`, {
     ...requestInit,
     method: method ?? 'GET',
     headers,
