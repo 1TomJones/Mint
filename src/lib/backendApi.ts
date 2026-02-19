@@ -257,8 +257,16 @@ export interface AdminEvent {
   ended_at?: string | null;
 }
 
-export function fetchAdminStatus(accessToken: string) {
-  return backendRequest<{ isAdmin: boolean }>('/api/admin/me', { accessToken });
+export async function fetchAdminStatus(accessToken: string) {
+  try {
+    return await backendRequest<{ isAdmin: boolean }>('/api/admin/me', { accessToken });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Backend route not deployed')) {
+      return backendRequest<{ isAdmin: boolean }>('/admin/me', { accessToken });
+    }
+
+    throw error;
+  }
 }
 
 export function fetchAdminEvents(accessToken: string) {
