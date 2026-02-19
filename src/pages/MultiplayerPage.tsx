@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
-import { RunRow, getFreshAccessToken, supabase } from '../lib/supabase';
+import { RunRow, fetchUserRuns, getFreshAccessToken } from '../lib/supabase';
 import {
   createRunByCode,
   fetchPortfolioScenarioMetadata,
@@ -56,16 +56,8 @@ export default function MultiplayerPage() {
 
       try {
         setRunsLoading(true);
-        const { data: runsData, error: runsError } = await supabase
-          .from<RunRow>('runs')
-          .select('id,created_at,finished_at,event_id,events(name,code),run_results(score,pnl,sharpe,max_drawdown)')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false });
-
-        if (runsError) {
-          throw runsError;
-        }
-
+        const freshAccessToken = await getFreshAccessToken();
+        const runsData = await fetchUserRuns(user.id, freshAccessToken);
         setRuns(runsData ?? []);
       } catch (loadError) {
         console.error('[MultiplayerPage] Failed to load run history', loadError);

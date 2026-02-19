@@ -11,6 +11,7 @@ interface BackendOptions {
 
 interface BackendErrorPayload {
   error?: string;
+  detail?: string;
   message?: string;
   [key: string]: unknown;
 }
@@ -38,7 +39,7 @@ interface ScenarioMetadataResponse {
 function toReadableError(rawBody: string) {
   try {
     const payload = JSON.parse(rawBody) as BackendErrorPayload;
-    return payload.error ?? payload.message ?? JSON.stringify(payload);
+    return payload.detail ?? payload.error ?? payload.message ?? JSON.stringify(payload);
   } catch {
     return rawBody;
   }
@@ -47,10 +48,6 @@ function toReadableError(rawBody: string) {
 function mapBackendError(status: number, rawMessage: string) {
   if (status === 404) {
     return `Backend route not deployed. Check backend base path (/api). (HTTP ${status})`;
-  }
-
-  if (/schema_mismatch|scenario_id|duration_minutes|column .* does not exist/i.test(rawMessage)) {
-    return `Supabase schema mismatch. Ensure events table has scenario_id and duration_minutes. (HTTP ${status})`;
   }
 
   return `${rawMessage || 'Backend request failed.'} (HTTP ${status})`;
@@ -269,8 +266,9 @@ export function fetchAdminEvents(accessToken: string) {
 }
 
 export interface CreateAdminEventInput {
-  event_code: string;
-  event_name: string;
+  code: string;
+  name: string;
+  description?: string;
   scenario_id: string;
   duration_minutes: number;
   sim_url: string;
