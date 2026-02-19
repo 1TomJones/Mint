@@ -37,28 +37,14 @@ export default function MultiplayerPage() {
     const load = async () => {
       try {
         setEventsLoading(true);
-        setError(null);
-
-        const metadata = await fetchPortfolioScenarioMetadata();
+        const [eventsData, metadata] = await Promise.all([fetchPublicEvents(), fetchPortfolioScenarioMetadata()]);
+        setEvents(eventsData.events);
         setScenarios(metadata);
         setScenarioError(null);
       } catch (loadError) {
-        console.error('[MultiplayerPage] Failed to load scenario metadata', loadError);
+        console.error('[MultiplayerPage] Failed to load events/metadata', loadError);
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load multiplayer data.');
         setScenarioError(loadError instanceof Error ? loadError.message : 'Cannot load scenarios');
-      }
-
-      try {
-        const eventsData = await fetchPublicEvents();
-        setEvents(eventsData.events);
-      } catch (loadError) {
-        console.error('[MultiplayerPage] Failed to load public events', loadError);
-        const message = loadError instanceof Error ? loadError.message : 'Failed to load active events.';
-
-        if (message.includes('HTTP 404')) {
-          setEvents([]);
-        } else {
-          setError(message);
-        }
       } finally {
         setEventsLoading(false);
       }

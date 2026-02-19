@@ -8,7 +8,6 @@ interface SupabaseAuthContextValue {
   loading: boolean;
   isAdmin: boolean;
   adminLoading: boolean;
-  adminError: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<{ needsEmailConfirmation: boolean }>;
   signOut: () => Promise<void>;
@@ -53,7 +52,6 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminLoading, setAdminLoading] = useState(true);
-  const [adminError, setAdminError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -98,7 +96,6 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
     const resolveAdmin = async () => {
       if (!accessToken || !user) {
         setIsAdmin(false);
-        setAdminError(null);
         setAdminLoading(false);
         return;
       }
@@ -107,12 +104,9 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
         setAdminLoading(true);
         const adminAllowed = await lookupAdminAllowlist(user.email);
         setIsAdmin(adminAllowed);
-        setAdminError(null);
       } catch (error) {
         console.error('[auth] failed to resolve admin status from admin_allowlist', error);
-        const detail = error instanceof Error ? error.message : String(error);
         setIsAdmin(false);
-        setAdminError(detail);
       } finally {
         setAdminLoading(false);
       }
@@ -129,7 +123,6 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
       loading,
       isAdmin,
       adminLoading,
-      adminError,
       signIn: async (email: string, password: string) => {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
@@ -153,10 +146,9 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
         setAccessToken(null);
         setIsAdmin(false);
-        setAdminError(null);
       },
     }),
-    [accessToken, adminError, adminLoading, isAdmin, loading, session, user],
+    [accessToken, adminLoading, isAdmin, loading, session, user],
   );
 
   return <SupabaseAuthContext.Provider value={value}>{children}</SupabaseAuthContext.Provider>;
