@@ -3,9 +3,9 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useSupabaseAuth } from '../context/SupabaseAuthContext';
 import { RunRow, fetchUserRuns, getFreshAccessToken } from '../lib/supabase';
 import {
+  createRunByCode,
   fetchPortfolioScenarioMetadata,
   fetchPublicEvents,
-  joinEventByCode,
   type PublicEvent,
   type ScenarioMetadata,
 } from '../lib/backendApi';
@@ -104,7 +104,7 @@ export default function MultiplayerPage() {
       setJoining(true);
       setError(null);
       const freshAccessToken = await getFreshAccessToken();
-      const createdRun = await joinEventByCode(eventCode.trim().toUpperCase(), user.id, freshAccessToken);
+      const createdRun = await createRunByCode(eventCode.trim().toUpperCase(), user.id, freshAccessToken);
       window.location.assign(createdRun.launchUrl);
     } catch (joinError) {
       console.error('[MultiplayerPage] Join event failed', joinError);
@@ -133,7 +133,7 @@ export default function MultiplayerPage() {
       setJoining(true);
       setError(null);
       const freshAccessToken = await getFreshAccessToken();
-      const createdRun = await joinEventByCode(code.trim().toUpperCase(), user.id, freshAccessToken);
+      const createdRun = await createRunByCode(code.trim().toUpperCase(), user.id, freshAccessToken);
       window.location.assign(createdRun.launchUrl);
     } catch (joinError) {
       console.error('[MultiplayerPage] Join event failed', joinError);

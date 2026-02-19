@@ -214,7 +214,7 @@ async function listPublicEvents() {
   let query = supabase
     .from('events')
     .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at,started_at,ended_at')
-    .in('state', ['active'])
+    .in('state', ['active', 'live', 'paused'])
     .order('created_at', { ascending: false });
 
   let { data: events, error } = await query;
@@ -242,7 +242,7 @@ async function createEventFromPayload(body) {
     sim_type: body?.sim_type?.toString().trim() || body?.simType?.toString().trim() || 'portfolio',
     scenario_id: body?.scenario_id?.toString().trim() || body?.scenarioId?.toString().trim() || null,
     duration_minutes: Number(body?.duration_minutes ?? body?.durationMinutes ?? 0) || null,
-    state: body?.state?.toString().trim() || 'draft',
+    state: body?.state?.toString().trim() || 'active',
     sim_url: body?.sim_url?.toString().trim() || body?.simUrl?.toString().trim() || null,
   };
 
@@ -284,49 +284,12 @@ async function createEventFromPayload(body) {
   return insertResult.data;
 }
 
-app.get('/api/events', async (req, res) => {
-  if (!(await requireAdmin(req, res))) {
-    return;
-  }
-
-  try {
-    const statusFilter = req.query?.status?.toString().trim().toLowerCase() || null;
-    let query = supabase
-      .from('events')
-      .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at,started_at,ended_at')
-      .order('created_at', { ascending: false });
-
-    if (statusFilter) {
-      query = query.eq('state', statusFilter);
-    }
-
-    let { data: events, error } = await query;
-
-    if (error && isMissingColumnError(error)) {
-      const fallback = await supabase
-        .from('events')
-        .select('id,code,name,sim_url,created_at,starts_at,ends_at,started_at,ended_at')
-        .order('created_at', { ascending: false });
-      events = withDefaultEventColumns(fallback.data, { sim_type: 'portfolio', state: 'active' });
-      error = fallback.error;
-    }
-
-    if (error) {
-      throw error;
-    }
-
-    return res.json({ events });
-  } catch (error) {
-    return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to fetch admin events' });
-  }
-});
-
-app.get('/api/events/active', async (_req, res) => {
+app.get('/api/events', async (_req, res) => {
   try {
     const events = await listPublicEvents();
     return res.json({ events });
   } catch (error) {
-    return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to fetch active events' });
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to fetch public events' });
   }
 });
 
@@ -336,56 +299,6 @@ app.get('/api/events/public', async (_req, res) => {
     return res.json({ events });
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to fetch public events' });
-  }
-});
-
-app.patch('/api/events/:id/status', async (req, res) => {
-  if (!(await requireAdmin(req, res))) {
-    return;
-  }
-
-  try {
-    const eventId = req.params.id?.trim();
-    const nextState = req.body?.status?.toString().trim().toLowerCase();
-
-    if (!eventId || !nextState) {
-      return res.status(400).json({ error: 'event id and status are required' });
-    }
-
-    const nowIso = new Date().toISOString();
-    const updatePayload = { state: nextState };
-
-    if (nextState === 'active') {
-      updatePayload.started_at = null;
-      updatePayload.ended_at = null;
-    }
-
-    if (nextState === 'live') {
-      updatePayload.started_at = nowIso;
-    }
-
-    if (nextState === 'ended') {
-      updatePayload.ended_at = nowIso;
-    }
-
-    const { data: event, error } = await supabase
-      .from('events')
-      .update(updatePayload)
-      .eq('id', eventId)
-      .select('id,code,name,sim_url,sim_type,scenario_id,duration_minutes,state,created_at,starts_at,ends_at,started_at,ended_at')
-      .maybeSingle();
-
-    if (error) {
-      throw error;
-    }
-
-    if (!event) {
-      return res.status(404).json({ error: 'event not found' });
-    }
-
-    return res.json({ event });
-  } catch (error) {
-    return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to update event state' });
   }
 });
 
@@ -540,7 +453,7 @@ app.get('/api/admin/events/:code/sim-admin-link', async (req, res) => {
 
 app.post('/api/runs/create', async (req, res) => {
   try {
-    const eventCode = req.body?.eventCode?.toString().trim().toUpperCase() || req.body?.event_code?.toString().trim().toUpperCase();
+    const eventCode = req.body?.eventCode?.toString().trim().toUpperCase();
     const userId = getUserId(req);
 
     if (!eventCode) {
@@ -553,17 +466,17 @@ app.post('/api/runs/create', async (req, res) => {
 
     let { data: event, error: eventError } = await supabase
       .from('events')
-      .select('id,code,sim_url,scenario_id,state')
+      .select('id,code,sim_url,scenario_id')
       .eq('code', eventCode)
       .maybeSingle();
 
     if (eventError && isMissingColumnError(eventError)) {
       const fallback = await supabase
         .from('events')
-        .select('id,code,sim_url,state')
+        .select('id,code,sim_url')
         .eq('code', eventCode)
         .maybeSingle();
-      event = fallback.data ? { ...fallback.data, scenario_id: null, state: fallback.data.state ?? 'active' } : fallback.data;
+      event = fallback.data ? { ...fallback.data, scenario_id: null } : fallback.data;
       eventError = fallback.error;
     }
 
@@ -572,76 +485,7 @@ app.post('/api/runs/create', async (req, res) => {
     }
 
     if (!event) {
-      return res.status(404).json({ detail: 'event not found' });
-    }
-
-    if ((event.state ?? 'active').toLowerCase() !== 'active') {
-      return res.status(400).json({ detail: 'event not active' });
-    }
-
-    const { data: run, error: runError } = await supabase
-      .from('runs')
-      .insert({ event_id: event.id, user_id: userId })
-      .select('id')
-      .single();
-
-    if (runError) {
-      throw runError;
-    }
-
-    const simUrl = new URL(event.sim_url);
-    simUrl.searchParams.set('run_id', run.id);
-    simUrl.searchParams.set('event_id', event.id);
-    simUrl.searchParams.set('event_code', event.code);
-    if (event.scenario_id) {
-      simUrl.searchParams.set('scenario_id', event.scenario_id);
-    }
-
-    return res.status(200).json({ runId: run.id, simUrl: simUrl.toString() });
-  } catch (error) {
-    return res.status(500).json({ error: error instanceof Error ? error.message : 'Unexpected error creating run' });
-  }
-});
-
-app.post('/api/events/join-by-code', async (req, res) => {
-  try {
-    const eventCode = req.body?.eventCode?.toString().trim().toUpperCase() || req.body?.event_code?.toString().trim().toUpperCase();
-    const userId = getUserId(req);
-
-    if (!eventCode) {
-      return res.status(400).json({ error: 'eventCode is required' });
-    }
-
-    if (!userId) {
-      return res.status(400).json({ error: 'userId is required for MVP run creation' });
-    }
-
-    let { data: event, error: eventError } = await supabase
-      .from('events')
-      .select('id,code,sim_url,scenario_id,state')
-      .eq('code', eventCode)
-      .maybeSingle();
-
-    if (eventError && isMissingColumnError(eventError)) {
-      const fallback = await supabase
-        .from('events')
-        .select('id,code,sim_url,state')
-        .eq('code', eventCode)
-        .maybeSingle();
-      event = fallback.data ? { ...fallback.data, scenario_id: null, state: fallback.data.state ?? 'active' } : fallback.data;
-      eventError = fallback.error;
-    }
-
-    if (eventError) {
-      throw eventError;
-    }
-
-    if (!event) {
-      return res.status(404).json({ detail: 'event not found' });
-    }
-
-    if ((event.state ?? 'active').toLowerCase() !== 'active') {
-      return res.status(400).json({ detail: 'event not active' });
+      return res.status(404).json({ error: 'Event not found for provided code' });
     }
 
     const { data: run, error: runError } = await supabase
