@@ -1,12 +1,5 @@
 import { ReactNode, createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { fetchAdminStatus } from '../lib/backendApi';
-import { appEnv } from '../lib/env';
 import { AuthUser, Session, supabase } from '../lib/supabase';
-
-const adminAllowlist = appEnv.adminAllowlistEmails
-  .split(',')
-  .map((value) => value.trim().toLowerCase())
-  .filter(Boolean);
 
 interface SupabaseAuthContextValue {
   user: AuthUser | null;
@@ -33,9 +26,23 @@ function toAuthUser(user: AuthUser | null): AuthUser | null {
   };
 }
 
-function isAllowlistedAdmin(email?: string) {
-  const normalizedEmail = email?.toLowerCase();
-  return !!normalizedEmail && adminAllowlist.includes(normalizedEmail);
+async function lookupAdminAllowlist(email?: string) {
+  const normalizedEmail = email?.trim().toLowerCase();
+  if (!normalizedEmail) {
+    return false;
+  }
+
+  const { data, error } = await supabase
+    .from<{ email: string }>('admin_allowlist')
+    .select('email')
+    .ilike('email', normalizedEmail)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return !!data;
 }
 
 export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
@@ -93,17 +100,12 @@ export function SupabaseAuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      if (isAllowlistedAdmin(user.email)) {
-        setIsAdmin(true);
-        setAdminLoading(false);
-        return;
-      }
-
       try {
         setAdminLoading(true);
-        const response = await fetchAdminStatus(accessToken);
-        setIsAdmin(response.isAdmin);
-      } catch {
+        const adminAllowed = await lookupAdminAllowlist(user.email);
+        setIsAdmin(adminAllowed);
+      } catch (error) {
+        console.error('[auth] failed to resolve admin status from admin_allowlist', error);
         setIsAdmin(false);
       } finally {
         setAdminLoading(false);
